@@ -38,3 +38,101 @@
 [2026-01-17 20:44:33] =========================================
 [2026-01-17 20:44:33]    PIPELINE COMPLETE - SUCCESS
 [2026-01-17 20:44:33] =========================================
+[2026-01-20 16:46:30] =========================================
+[2026-01-20 16:46:30]    STARTING NBA PREDICTION PIPELINE
+[2026-01-20 16:46:30] =========================================
+[2026-01-20 16:46:30] Starting get_schedule.py...
+[2026-01-20 16:46:32] get_schedule.py finished successfully (1.37s).
+[2026-01-20 16:46:32] Starting fetch_rosters.py...
+[2026-01-20 16:46:42] fetch_rosters.py finished successfully (10.31s).
+[2026-01-20 16:46:42] Starting fetch_player_stats.py...
+[2026-01-20 16:49:42] fetch_player_stats.py finished successfully (179.81s).
+[2026-01-20 16:49:42] Starting train_model.py...
+[2026-01-20 16:49:52] train_model.py finished successfully (10.68s).
+[2026-01-20 16:49:52] Starting predict_tonight.py...
+[2026-01-20 16:49:55] predict_tonight.py finished successfully (2.25s).
+[2026-01-20 16:49:55] =========================================
+[2026-01-20 16:49:55]    PIPELINE COMPLETE - SUCCESS
+[2026-01-20 16:49:55] =========================================
+[2026-01-20 17:33:27] =========================================
+[2026-01-20 17:33:27]    STARTING NBA PREDICTION PIPELINE
+[2026-01-20 17:33:27] =========================================
+[2026-01-20 17:33:27] Starting get_schedule.py...
+[2026-01-20 17:33:28] get_schedule.py finished successfully (1.39s).
+[2026-01-20 17:33:28] Starting fetch_rosters.py...
+[2026-01-20 17:33:39] fetch_rosters.py finished successfully (10.61s).
+[2026-01-20 17:33:39] Starting fetch_player_stats.py...
+[2026-01-20 17:36:40] fetch_player_stats.py finished successfully (180.9s).
+[2026-01-20 17:36:40] Starting train_model.py...
+[2026-01-20 17:36:43] train_model.py finished successfully (3.33s).
+[2026-01-20 17:36:43] Starting predict_tonight.py...
+[2026-01-20 17:36:47] predict_tonight.py finished successfully (3.4s).
+[2026-01-20 17:36:47] =========================================
+[2026-01-20 17:36:47]    PIPELINE COMPLETE - SUCCESS
+[2026-01-20 17:36:47] =========================================
+[2026-01-20 17:48:05] -----------------------------------------
+[2026-01-20 17:48:05]    STARTING NBA PIPELINE
+[2026-01-20 17:48:05] -----------------------------------------
+[2026-01-20 17:48:05] Starting get_schedule.py...
+[2026-01-20 17:48:06] FINISHED: get_schedule.py (1.46s)
+[2026-01-20 17:48:06] Starting fetch_rosters.py...
+[2026-01-20 17:48:17] FINISHED: fetch_rosters.py (10.44s)
+[2026-01-20 17:48:17] Starting fetch_injuries.py...
+[2026-01-20 17:48:18] FINISHED: fetch_injuries.py (1.68s)
+[2026-01-20 17:48:18] Starting fetch_player_stats.py...
+[2026-01-20 17:51:17] FINISHED: fetch_player_stats.py (178.28s)
+[2026-01-20 17:51:17] Starting train_model.py...
+[2026-01-20 17:51:19] FINISHED: train_model.py (2.37s)
+[2026-01-20 17:51:19] Starting predict_tonight.py...
+[2026-01-20 17:51:21] FAILED: predict_tonight.py (2.08s)
+[2026-01-20 17:51:21] Error Output:
+Traceback (most recent call last):
+  File "C:\Users\gmatt\AppData\Local\Programs\Python\Python311\Lib\site-packages\pandas\core\indexes\base.py", line 3805, in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "index.pyx", line 167, in pandas._libs.index.IndexEngine.get_loc
+  File "index.pyx", line 196, in pandas._libs.index.IndexEngine.get_loc
+  File "pandas\\_libs\\hashtable_class_helper.pxi", line 7081, in pandas._libs.hashtable.PyObjectHashTable.get_item
+  File "pandas\\_libs\\hashtable_class_helper.pxi", line 7089, in pandas._libs.hashtable.PyObjectHashTable.get_item
+KeyError: 'TeamID'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "c:\Users\gmatt\Downloads\NBA\nba-predictor\predict_tonight.py", line 104, in <module>
+    'TeamID': row['TeamID'] # Keep TeamID for the dashboard
+              ~~~^^^^^^^^^^
+  File "C:\Users\gmatt\AppData\Local\Programs\Python\Python311\Lib\site-packages\pandas\core\series.py", line 1121, in __getitem__
+    return self._get_value(key)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\gmatt\AppData\Local\Programs\Python\Python311\Lib\site-packages\pandas\core\series.py", line 1237, in _get_value
+    loc = self.index.get_loc(label)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\gmatt\AppData\Local\Programs\Python\Python311\Lib\site-packages\pandas\core\indexes\base.py", line 3812, in get_loc
+    raise KeyError(key) from err
+KeyError: 'TeamID'
+
+[2026-01-20 18:00:34] -----------------------------------------
+[2026-01-20 18:00:34]    STARTING NBA PIPELINE
+[2026-01-20 18:00:34] -----------------------------------------
+[2026-01-20 18:00:34] Starting get_schedule.py...
+[2026-01-20 18:00:35] FINISHED: get_schedule.py (1.4s)
+[2026-01-20 18:00:35] Starting fetch_rosters.py...
+[2026-01-20 18:00:46] -----------------------------------------
+[2026-01-20 18:00:46]    STARTING NBA PIPELINE
+[2026-01-20 18:00:46] -----------------------------------------
+[2026-01-20 18:00:46] Starting get_schedule.py...
+[2026-01-20 18:00:48] FINISHED: get_schedule.py (1.48s)
+[2026-01-20 18:00:48] Starting fetch_rosters.py...
+[2026-01-20 18:00:59] FINISHED: fetch_rosters.py (10.8s)
+[2026-01-20 18:00:59] Starting fetch_injuries.py...
+[2026-01-20 18:01:00] FINISHED: fetch_injuries.py (1.39s)
+[2026-01-20 18:01:00] Starting fetch_player_stats.py...
+[2026-01-20 18:04:11] FINISHED: fetch_player_stats.py (190.68s)
+[2026-01-20 18:04:11] Starting train_model.py...
+[2026-01-20 18:04:13] FINISHED: train_model.py (2.33s)
+[2026-01-20 18:04:13] Starting predict_tonight.py...
+[2026-01-20 18:04:15] FINISHED: predict_tonight.py (2.21s)
+[2026-01-20 18:04:15] -----------------------------------------
+[2026-01-20 18:04:15]    PIPELINE COMPLETE
+[2026-01-20 18:04:15] -----------------------------------------
