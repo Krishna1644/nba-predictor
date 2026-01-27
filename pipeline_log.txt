@@ -190,3 +190,48 @@ KeyError: 'TeamID'
 [2026-01-26 21:58:13] -----------------------------------------
 [2026-01-26 21:58:13]    PIPELINE COMPLETE
 [2026-01-26 21:58:13] -----------------------------------------
+[2026-01-26 23:51:05] Starting get_schedule.py...
+[2026-01-26 23:51:07] FINISHED: get_schedule.py (1.88s)
+[2026-01-26 23:51:07] Starting fetch_rosters.py...
+[2026-01-26 23:51:18] FINISHED: fetch_rosters.py (10.81s)
+[2026-01-26 23:51:18] Starting fetch_injuries.py...
+[2026-01-26 23:51:20] FINISHED: fetch_injuries.py (1.77s)
+[2026-01-26 23:51:20] Starting fetch_player_stats.py...
+[2026-01-26 23:54:39] FINISHED: fetch_player_stats.py (199.25s)
+[2026-01-26 23:54:39] Starting optimize_weights.py...
+[2026-01-26 23:54:40] FAILED: optimize_weights.py (1.23s)
+[2026-01-26 23:54:40] Error Output:
+Traceback (most recent call last):
+  File "C:\Users\gmatt\AppData\Local\Programs\Python\Python311\Lib\site-packages\pandas\core\indexes\base.py", line 3805, in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "index.pyx", line 167, in pandas._libs.index.IndexEngine.get_loc
+  File "index.pyx", line 196, in pandas._libs.index.IndexEngine.get_loc
+  File "pandas\\_libs\\hashtable_class_helper.pxi", line 7081, in pandas._libs.hashtable.PyObjectHashTable.get_item
+  File "pandas\\_libs\\hashtable_class_helper.pxi", line 7089, in pandas._libs.hashtable.PyObjectHashTable.get_item
+KeyError: 'PLAYER_ID'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "c:\Users\gmatt\Downloads\NBA\nba-predictor\optimize_weights.py", line 65, in <module>
+    optimize()
+  File "c:\Users\gmatt\Downloads\NBA\nba-predictor\optimize_weights.py", line 31, in optimize
+    for pid in df['PLAYER_ID'].unique():
+               ~~^^^^^^^^^^^^^
+  File "C:\Users\gmatt\AppData\Local\Programs\Python\Python311\Lib\site-packages\pandas\core\frame.py", line 4102, in __getitem__
+    indexer = self.columns.get_loc(key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\gmatt\AppData\Local\Programs\Python\Python311\Lib\site-packages\pandas\core\indexes\base.py", line 3812, in get_loc
+    raise KeyError(key) from err
+KeyError: 'PLAYER_ID'
+
+[2026-01-26 23:54:40] Starting predict_tonight.py...
+[2026-01-26 23:54:41] FAILED: predict_tonight.py (0.89s)
+[2026-01-26 23:54:41] Error Output:
+Traceback (most recent call last):
+  File "c:\Users\gmatt\Downloads\NBA\nba-predictor\predict_tonight.py", line 12, in <module>
+    weights = json.load(open("weights.json"))
+                        ^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'weights.json'
+

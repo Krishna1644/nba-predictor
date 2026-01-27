@@ -2,30 +2,30 @@ Player,Pos,Date,Injury,Status
 Zaccharie Risacher,SF,"Mon, Jan 26",Knee,Game Time Decision
 Kristaps Porzingis,C,"Mon, Jan 26",Achilles,Expected to be out until at least Feb 3
 N'Faly Dante,C,"Thu, Jan 15",Knee,Out for the season
-Luka Garza,PF,"Mon, Jan 26",Illness,Expected to be out until at least Jan 28
-Chris Boucher,C,"Mon, Jan 26",Illness,Expected to be out until at least Jan 28
+Luka Garza,PF,"Mon, Jan 26",Illness,Game Time Decision
+Chris Boucher,C,"Mon, Jan 26",Illness,Game Time Decision
 Jayson Tatum,PF,"Wed, Oct 1",Achilles,Expected to be out until at least Apr 1
 Tyrese Martin,SF,"Mon, Jan 26",Knee,Game Time Decision
 Cam Thomas,SG,"Mon, Jan 26",Ankle,Game Time Decision
 Haywood Highsmith,SF,"Mon, Jan 26",Knee,Expected to be out until at least Feb 1
-Noah Clowney,PF,"Mon, Jan 26",Back,Expected to be out until at least Jan 29
 Nolan Traore,PG,"Mon, Jan 26",Illness,Game Time Decision
+Noah Clowney,PF,"Mon, Jan 26",Back,Expected to be out until at least Jan 29
 KJ Simpson,PG,"Mon, Jan 26",Hip,Game Time Decision
 Mason Plumlee,C,"Thu, Jan 22",Groin,Expected to be out until at least Feb 19
-Tre Jones,PG,"Mon, Jan 26",Hamstring,Expected to be out until at least Jan 28
+Tre Jones,PG,"Mon, Jan 26",Hamstring,Game Time Decision
 Zach Collins,C,"Wed, Jan 14",Toe,Expected to be out until at least Feb 19
 Noa Essengue,PF,"Wed, Dec 3",Shoulder,Out for the season
-Sam Merrill,SG,"Mon, Jan 26",Personal,Expected to be out until at least Jan 28
-De'Andre Hunter,SF,"Mon, Jan 26",Knee,Expected to be out until at least Jan 28
+Sam Merrill,SG,"Mon, Jan 26",Personal,Game Time Decision
+De'Andre Hunter,SF,"Mon, Jan 26",Knee,Game Time Decision
+Darius Garland,PG,"Mon, Jan 26",Toe,Game Time Decision
 Chris Livingston,SF,"Mon, Jan 26",Wrist,Game Time Decision
 Luke Travers,SF,"Sun, Jan 25",Illness,Game Time Decision
 Max Strus,SG,"Thu, Jan 22",Foot,Expected to be out until at least Feb 19
-Darius Garland,PG,"Sun, Jan 18",Toe,Expected to be out until at least Jan 28
-Brandon Williams,PG,"Sun, Jan 25",Knee,Game Time Decision
-Cooper Flagg,SF,"Sun, Jan 25",Ankle,Game Time Decision
-Max Christie,SG,"Sun, Jan 25",Ankle,Game Time Decision
-Moussa Cisse,C,"Sun, Jan 25",Illness,Game Time Decision
 Klay Thompson,SG,"Sun, Jan 25",Knee,Game Time Decision
+Moussa Cisse,C,"Sun, Jan 25",Illness,Game Time Decision
+Cooper Flagg,SF,"Sun, Jan 25",Ankle,Game Time Decision
+Brandon Williams,PG,"Sun, Jan 25",Knee,Game Time Decision
+Max Christie,SG,"Sun, Jan 25",Ankle,Game Time Decision
 Anthony Davis,C,"Tue, Jan 13",Finger,Expected to be out until at least Mar 1
 Kyrie Irving,PG,"Sat, Dec 13",Knee,Expected to be out until at least Feb 12
 Dereck Lively II,C,"Wed, Dec 10",Foot,Out for the season
@@ -34,16 +34,16 @@ Christian Braun,SG,"Mon, Jan 26",Ankle,Expected to be out until at least Jan 29
 Cameron Johnson,SF,"Mon, Jan 26",Knee,Expected to be out until at least Feb 3
 Aaron Gordon,PF,"Mon, Jan 26",Hamstring,Expected to be out until at least Jan 29
 Jonas Valanciunas,C,"Sun, Jan 25",Calf,Game Time Decision
-Jamal Murray,PG,"Sun, Jan 25",Hamstring,Game Time Decision
 Peyton Watson,SF,"Sun, Jan 25",Ankle,Game Time Decision
+Jamal Murray,PG,"Sun, Jan 25",Hamstring,Game Time Decision
 Nikola Jokic,C,"Tue, Dec 30",Knee,Expected to be out until at least Feb 1
 Tamar Bates,SG,"Mon, Dec 22",Foot,Expected to be out until at least Apr 1
 VertCaris LeVert,SG,"Mon, Jan 26",Illness,Expected to be out until at least Jan 29
-Al Horford,C,"Mon, Jan 26",Toe,Expected to be out until at least Jan 28
-De'Anthony Melton,SG,"Mon, Jan 26",Knee,Expected to be out until at least Jan 28
-L.J. Cryer,PG,"Mon, Jan 26",Hamstring,Expected to be out until at least Jan 28
-Stephen Curry,PG,"Mon, Jan 26",Knee,Expected to be out until at least Jan 28
-Draymond Green,PF,"Mon, Jan 26",Back,Expected to be out until at least Jan 28
+Al Horford,C,"Tue, Jan 27",Toe,Game Time Decision
+Draymond Green,PF,"Tue, Jan 27",Back,Game Time Decision
+De'Anthony Melton,SG,"Tue, Jan 27",Knee,Game Time Decision
+L.J. Cryer,PG,"Tue, Jan 27",Hamstring,Game Time Decision
+Stephen Curry,PG,"Tue, Jan 27",Knee,Game Time Decision
 Jonathan Kuminga,PF,"Sun, Jan 25",Knee,Expected to be out until at least Feb 9
 Seth Curry,SG,"Sun, Jan 25",Back,Expected to be out until at least Feb 3
 Jimmy Butler,SF,"Tue, Jan 20",Knee,Out for the season
@@ -51,15 +51,15 @@ Steven Adams,C,"Thu, Jan 22",Ankle,Expected to be out until at least Mar 16
 VleetFred VanVleet,PG,"Tue, Oct 21",Knee,Expected to be out until at least Jun 1
 Obi Toppin,PF,"Fri, Oct 31",Foot,Expected to be out until at least Feb 2
 Tyrese Haliburton,PG,"Tue, Oct 28",Achilles,Out for the season
-TyTy Washington Jr.,PG,"Mon, Jan 26",Hamstring,Game Time Decision
 Derrick Jones Jr.,SF,"Mon, Jan 26",Knee,Expected to be out until at least Feb 6
+TyTy Washington Jr.,PG,"Mon, Jan 26",Hamstring,Game Time Decision
+Bogdan Bogdanovic,SG,"Mon, Jan 26",Hamstring,Expected to be out until at least Jan 30
 Kawhi Leonard,SF,"Mon, Jan 26",Knee,Game Time Decision
 Kris Dunn,PG,"Mon, Jan 26",Ankle,Game Time Decision
-Bogdan Bogdanovic,SG,"Mon, Jan 26",Hamstring,Expected to be out until at least Jan 30
 Bradley Beal,SG,"Wed, Nov 12",Hip,Out for the season
-Austin Reaves,SG,"Sun, Jan 25",Calf,Expected to be out until at least Jan 28
+Austin Reaves,SG,"Mon, Jan 26",Calf,Game Time Decision
 Adou Thiero,SF,"Thu, Jan 1",Knee,Expected to be out until at least Feb 2
-Jock Landale,C,"Mon, Jan 26",Personal,Expected to be out until at least Jan 28
+Jock Landale,C,"Mon, Jan 26",Personal,Game Time Decision
 Ja Morant,PG,"Sat, Jan 24",Elbow,Expected to be out until at least Feb 20
 Ty Jerome,SG,"Sat, Jan 24",Calf,Expected to be out until at least Jan 30
 Scotty Pippen Jr.,PG,"Wed, Jan 14",Toe,Expected to be out until at least Feb 20
@@ -72,27 +72,27 @@ Terry Rozier,SG,"Sun, Dec 14",Not Injury Related,Expected to be out until at lea
 Giannis Antetokounmpo,PF,"Sat, Jan 24",Calf,Expected to be out until at least Feb 20
 Kevin Porter,PG,"Wed, Jan 21",Oblique,Expected to be out until at least Feb 3
 Taurean Prince,SG,"Thu, Jan 1",Neck,Expected to be out until at least Feb 20
-Anthony Edwards,SG,"Mon, Jan 26",Foot,Expected to be out until at least Jan 28
+Anthony Edwards,SG,"Tue, Jan 27",Foot,Game Time Decision
 Terrence Shannon Jr.,SG,"Mon, Jan 26",Foot,Expected to be out until at least Feb 2
 Dejounte Murray,PG,"Wed, Jan 7",Achilles,Expected to be out until at least Feb 20
 Ajay Mitchell,PG,"Mon, Jan 26",Abdomen,Expected to be out until at least Jan 29
-Alex Caruso,PG,"Mon, Jan 26",Thigh,Expected to be out until at least Jan 29
 Isaiah Hartenstein,C,"Mon, Jan 26",Calf,Expected to be out until at least Jan 29
+Alex Caruso,PG,"Mon, Jan 26",Thigh,Expected to be out until at least Jan 29
 Cason Wallace,PG,"Mon, Jan 26",Hip,Game Time Decision
 Jalen Williams,SF,"Mon, Jan 19",Hamstring,Expected to be out until at least Feb 3
 Nikola Topic,PG,"Thu, Oct 30",Groin,Expected to be out until at least Feb 20
 Thomas Sorber,PF,"Tue, Oct 28",Knee,Out for the season
-Colin Castleton,C,"Sun, Jan 25",Thumb,Expected to be out until at least Jan 28
-Franz Wagner,PF,"Sun, Jan 25",Ankle,Expected to be out until at least Jan 28
+Colin Castleton,C,"Mon, Jan 26",Thumb,Game Time Decision
+Franz Wagner,PF,"Mon, Jan 26",Ankle,Game Time Decision
 Paul George,SF,"Mon, Jan 26",Knee,Game Time Decision
 Joel Embiid,C,"Mon, Jan 26",Knee,Game Time Decision
 MarJon Beauchamp,SF,"Sun, Jan 25",Ankle,Game Time Decision
 Jalen Green,SG,"Mon, Jan 26",Hamstring,Game Time Decision
 Devin Booker,SG,"Sun, Jan 25",Ankle,Expected to be out until at least Feb 1
-Deni Avdija,SG,"Mon, Jan 26",Back,Expected to be out until at least Jan 27
-Kris Murray,PF,"Sun, Jan 25",Back,Expected to be out until at least Feb 1
-Duop Reath,C,"Sun, Jan 25",Foot,Expected to be out until at least Jan 27
+Duop Reath,C,"Mon, Jan 26",Foot,Game Time Decision
+Deni Avdija,SG,"Mon, Jan 26",Back,Game Time Decision
 Matisse Thybulle,SF,"Sun, Jan 25",Knee,Expected to be out until at least Feb 1
+Kris Murray,PF,"Sun, Jan 25",Back,Expected to be out until at least Feb 1
 Scoot Henderson,PG,"Sun, Jan 25",Hamstring,Expected to be out until at least Feb 1
 Blake Wesley,SG,"Wed, Nov 5",Foot,Expected to be out until at least Jan 30
 Damian Lillard,PG,"Tue, Oct 28",Achilles,Out for the season
@@ -103,10 +103,10 @@ David Jones,SF,"Mon, Jan 26",Undisclosed,Game Time Decision
 Collin Murray-Boyles,PF,"Mon, Jan 26",Thumb,Game Time Decision
 Jakob Poeltl,C,"Sun, Jan 25",Back,Expected to be out until at least Feb 8
 Chucky Hepburn,PG,"Thu, Jan 8",Knee,Expected to be out until at least Feb 19
-Jusuf Nurkic,C,"Mon, Jan 26",Illness,Game Time Decision
+EJ Harkless,SG,"Tue, Jan 27",Hamstring,Game Time Decision
 Georges Niang,PF,"Mon, Jan 26",Foot,Expected to be out until at least Feb 1
 Keyonte George,SG,"Mon, Jan 26",Rest,Expected to be out until at least Jan 28
-EJ Harkless,SG,"Sun, Jan 25",Hamstring,Expected to be out until at least Jan 28
+Jusuf Nurkic,C,"Mon, Jan 26",Illness,Game Time Decision
 Kevin Love,PF,"Sun, Jan 25",Knee,Game Time Decision
 Lauri Markkanen,PF,"Sun, Jan 25",Illness,Game Time Decision
 Walker Kessler,C,"Wed, Nov 5",Shoulder,Out for the season

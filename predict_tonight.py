@@ -1,142 +1,85 @@
 import pandas as pd
 import sqlite3
-import joblib
-import sys
-import unicodedata
-import re
+import json
+import datetime
+import os
 
-# 1. SETUP
-print("--- PREDICTION ENGINE STARTING ---")
+# CONFIG
+WEIGHTS_FILE = 'weights.json'
+HISTORY_DIR = 'history'
+DB_NAME = 'nba_stats.db'
 
-# --- THE FIX: AGGRESSIVE NAME MATCHING ---
-def simplify_name(name):
-    """
-    Turns 'Jimmy Butler III' -> 'jimmy butler'
-    Turns 'Tim Hardaway Jr.' -> 'tim hardaway'
-    Turns 'Luka Dončić' -> 'luka doncic'
-    """
-    # 1. Lowercase and strip
-    name = str(name).lower().strip()
-    
-    # 2. Remove Accents (Dončić -> Doncic)
-    nfkd_form = unicodedata.normalize('NFKD', name)
-    name = "".join([c for c in nfkd_form if not unicodedata.combining(c)])
-    
-    # 3. Remove Suffixes (Jr, Sr, II, III, IV) using Regex
-    # We look for these patterns at the END of the string
-    suffixes = r'\s+(jr\.?|sr\.?|ii|iii|iv|v)$'
-    name = re.sub(suffixes, '', name)
-    
-    # 4. Remove all punctuation (dots, apostrophes)
-    name = name.replace('.', '').replace("'", "")
-    
-    # 5. Collapse multiple spaces to one
-    name = " ".join(name.split())
-    
-    return name.strip()
+def get_weights_safe(weights, team_id, role):
+    tid = str(team_id)
+    if tid not in weights:
+        return 0.5, 0.5 # Default if new team
+    return weights[tid][role]['L3_Weight'], weights[tid][role]['L10_Weight']
 
-# Load Resources
-try:
-    model = joblib.load('nba_points_model.pkl')
-    print("[OK] Model loaded.")
-except:
-    print("[ERROR] Model not found.")
-    sys.exit()
-
-try:
-    rosters = pd.read_csv('todays_rosters.csv', encoding='utf-8')
-    print(f"[OK] Roster loaded: {len(rosters)} players.")
-except:
-    print("[ERROR] Roster not found.")
-    sys.exit()
+def main():
+    print("--- PREDICTING TONIGHT ---")
     
-# --- LOAD INJURIES ---
-try:
-    injuries = pd.read_csv('injuries.csv')
-    print(f"[OK] Injury Report loaded: {len(injuries)} records.")
-    
-    # Create a SET of simplified names for fast lookup
-    # This turns ["Jimmy Butler"] into {"jimmy butler"}
-    injured_set = set(injuries['Player'].apply(simplify_name))
-    
-    # DEBUG: Print Jimmy Butler to prove it works
-    if "jimmy butler" in injured_set:
-        print("   -> Verified: Jimmy Butler is in the injury block list.")
-    
-except FileNotFoundError:
-    print("[WARNING] 'injuries.csv' not found. Assuming everyone is healthy.")
-    injured_set = set()
-
-try:
-    conn = sqlite3.connect("nba_stats.db")
-    df_stats = pd.read_sql("SELECT * FROM player_logs", conn)
-    conn.close()
-    print(f"[OK] Database loaded: {len(df_stats)} games.")
-except Exception as e:
-    print(f"[ERROR] Database Error: {e}")
-    sys.exit()
-
-# 2. CLEAN DATA
-df_stats.columns = [x.upper() for x in df_stats.columns]
-rosters.columns = [x.upper() for x in rosters.columns]
-
-for col in ['PTS', 'REB', 'AST', 'MIN']:
-    if col in df_stats.columns:
-        df_stats[col] = pd.to_numeric(df_stats[col], errors='coerce')
-
-df_stats['PLAYER_ID'] = pd.to_numeric(df_stats['PLAYER_ID'], errors='coerce').fillna(0).astype(int)
-df_stats['GAME_DATE'] = pd.to_datetime(df_stats['GAME_DATE'])
-
-# 3. PREDICT
-predictions = []
-
-def get_last_3_avg(player_id):
-    my_games = df_stats[df_stats['PLAYER_ID'] == player_id].copy()
-    my_games = my_games.sort_values(by='GAME_DATE', ascending=False)
-    
-    if len(my_games) < 3:
-        return None
+    # Load Weights
+    with open(WEIGHTS_FILE, 'r') as f:
+        weights = json.load(f)
         
-    last_3 = my_games.head(3)
-    return [last_3['PTS'].mean(), last_3['REB'].mean()]
+    rosters = pd.read_csv('todays_rosters.csv')
+    conn = sqlite3.connect(DB_NAME)
+    
+    # Injury Filter
+    try:
+        injuries = pd.read_csv('injuries.csv')
+        injured_players = set(injuries['Player'].str.lower().str.strip())
+    except:
+        injured_players = set()
 
-print("[...] Generating predictions...")
-
-skipped_count = 0
-for index, row in rosters.iterrows():
-    pid = row['PLAYER_ID']
-    pname = row['PLAYER']
+    predictions = []
     
-    # --- ROBUST INJURY FILTER ---
-    # Simplify the roster name ("Jimmy Butler III" -> "jimmy butler")
-    pname_simple = simplify_name(pname)
-    
-    if pname_simple in injured_set:
-        skipped_count += 1
-        # Optional: Print to confirm
-        # print(f"🚫 Removing Injured Player: {pname}")
-        continue
-    
-    features = get_last_3_avg(pid)
-    
-    if features:
-        feat_df = pd.DataFrame([features], columns=['PTS_L3', 'REB_L3'])
-        predicted_pts = model.predict(feat_df)[0]
+    for _, row in rosters.iterrows():
+        pid = row['PLAYER_ID']
+        name = row['PLAYER']
+        team_id = row['TeamID']
+        
+        if name.lower().strip() in injured_players: continue
+            
+        # Get Stats (Newest First for Prediction)
+        query = f"SELECT * FROM player_logs WHERE PLAYER_ID = {pid} ORDER BY GAME_DATE DESC LIMIT 20"
+        df_p = pd.read_sql(query, conn)
+        
+        if len(df_p) < 10: continue 
+        
+        # Calculate Inputs
+        l3 = df_p.head(3)['PTS'].mean()
+        l10 = df_p.head(10)['PTS'].mean()
+        avg_min = df_p['MIN'].mean()
+        role = "STARTER" if avg_min >= 25 else "BENCH"
+        
+        # Apply The Brain
+        w_l3, w_l10 = get_weights_safe(weights, team_id, role)
+        pred = (l3 * w_l3) + (l10 * w_l10)
         
         predictions.append({
-            'Player': pname,
-            'Predicted_PTS': round(predicted_pts, 1),
-            'L3_Avg_PTS': round(features[0], 1)
+            "Player": name,
+            "TeamID": team_id,
+            "Predicted_PTS": round(pred, 1),
+            "Role": role,
+            "L3": round(l3, 1),
+            "L10": round(l10, 1),
+            "Weight_Form": round(w_l3, 2)
         })
 
-print(f"[INFO] Successfully removed {skipped_count} injured players from predictions.")
+    # Save
+    if predictions:
+        today_str = datetime.date.today().strftime("%Y-%m-%d")
+        
+        # 1. Save to History (For the Manager)
+        if not os.path.exists(HISTORY_DIR): os.makedirs(HISTORY_DIR)
+        pd.DataFrame(predictions).to_csv(f"{HISTORY_DIR}/preds_{today_str}.csv", index=False)
+        
+        # 2. Save to Dashboard
+        pd.DataFrame(predictions).to_csv("final_predictions.csv", index=False)
+        print(f"[SUCCESS] Predictions generated.")
+    else:
+        print("[FAIL] No predictions generated.")
 
-# 4. SAVE
-if not predictions:
-    print("[WARNING] No predictions generated.")
-else:
-    results_df = pd.DataFrame(predictions)
-    results_df = results_df.sort_values(by='Predicted_PTS', ascending=False)
-    
-    results_df.to_csv('final_predictions.csv', index=False, encoding='utf-8-sig')
-    print(f"[OK] Predictions saved. {len(results_df)} players active.")
+if __name__ == "__main__":
+    main()

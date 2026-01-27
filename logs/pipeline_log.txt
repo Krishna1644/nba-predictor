@@ -1,0 +1,61 @@
+[2026-01-27 01:20:57] === PIPELINE STARTED ===
+[2026-01-27 01:20:57] Running: get_schedule.py 
+[2026-01-27 01:20:58] Running: fetch_rosters.py 
+[2026-01-27 01:21:09] Running: fetch_injuries.py 
+[2026-01-27 01:21:11] Running: fetch_player_stats.py 
+[2026-01-27 01:23:17] === PIPELINE STARTED ===
+[2026-01-27 01:23:17] Running: get_schedule.py 
+[2026-01-27 01:23:18] Running: fetch_rosters.py 
+[2026-01-27 01:23:29] Running: fetch_injuries.py 
+[2026-01-27 01:23:31] Running: fetch_player_stats.py 
+[2026-01-27 01:26:15] No history found. Triggering RESET.
+[2026-01-27 01:26:15] >>> ENTERING PART 1: SEASON REPLAY
+[2026-01-27 01:26:15] Running: optimize_weights.py --mode replay
+[2026-01-27 01:26:16] ERROR in optimize_weights.py:
+Traceback (most recent call last):
+  File "C:\Users\gmatt\Downloads\NBA\nba-predictor\optimize_weights.py", line 106, in <module>
+    run_teacher(args.mode)
+  File "C:\Users\gmatt\Downloads\NBA\nba-predictor\optimize_weights.py", line 52, in run_teacher
+    print(f"--- \U0001f468\U0001f3eb TEACHER RUNNING IN [{mode.upper()}] MODE ---")
+  File "C:\Users\gmatt\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 4-5: character maps to <undefined>
+
+[2026-01-27 01:26:41] === PIPELINE STARTED ===
+[2026-01-27 01:26:41] Running: get_schedule.py 
+[2026-01-27 01:26:43] Running: fetch_rosters.py 
+[2026-01-27 01:26:53] Running: fetch_injuries.py 
+[2026-01-27 01:26:54] Running: fetch_player_stats.py 
+[2026-01-27 01:29:50] No history found. Triggering RESET.
+[2026-01-27 01:29:50] >>> ENTERING PART 1: SEASON REPLAY
+[2026-01-27 01:29:50] Running: optimize_weights.py --mode replay
+[2026-01-27 01:29:51] ERROR in optimize_weights.py:
+Traceback (most recent call last):
+  File "C:\Users\gmatt\AppData\Local\Programs\Python\Python311\Lib\site-packages\pandas\core\indexes\base.py", line 3805, in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "index.pyx", line 167, in pandas._libs.index.IndexEngine.get_loc
+  File "index.pyx", line 196, in pandas._libs.index.IndexEngine.get_loc
+  File "pandas\\_libs\\hashtable_class_helper.pxi", line 7081, in pandas._libs.hashtable.PyObjectHashTable.get_item
+  File "pandas\\_libs\\hashtable_class_helper.pxi", line 7089, in pandas._libs.hashtable.PyObjectHashTable.get_item
+KeyError: 'TEAM_ID'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\gmatt\Downloads\NBA\nba-predictor\optimize_weights.py", line 106, in <module>
+    run_teacher(args.mode)
+  File "C:\Users\gmatt\Downloads\NBA\nba-predictor\optimize_weights.py", line 90, in run_teacher
+    weights = ensure_team_exists(weights, current_game['TEAM_ID'])
+                                          ~~~~~~~~~~~~^^^^^^^^^^^
+  File "C:\Users\gmatt\AppData\Local\Programs\Python\Python311\Lib\site-packages\pandas\core\series.py", line 1121, in __getitem__
+    return self._get_value(key)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\gmatt\AppData\Local\Programs\Python\Python311\Lib\site-packages\pandas\core\series.py", line 1237, in _get_value
+    loc = self.index.get_loc(label)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\gmatt\AppData\Local\Programs\Python\Python311\Lib\site-packages\pandas\core\indexes\base.py", line 3812, in get_loc
+    raise KeyError(key) from err
+KeyError: 'TEAM_ID'
+
