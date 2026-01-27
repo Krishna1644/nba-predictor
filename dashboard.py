@@ -118,9 +118,21 @@ with tab1:
 
             col1, col2 = st.columns(2)
             
+            # Determine Colors
+            if away_score > home_score:
+                away_color = "#4CAF50" # Green
+                home_color = "#FF5252" # Red
+                away_icon = "🏆 "
+                home_icon = ""
+            else:
+                away_color = "#FF5252" # Red
+                home_color = "#4CAF50" # Green
+                away_icon = ""
+                home_icon = "🏆 "
+
             # --- AWAY TEAM ---
             with col1:
-                st.subheader(f"Visiting: {away_name}")
+                st.markdown(f"<h3 style='color: {away_color}'>{away_icon}Visiting: {away_name}</h3>", unsafe_allow_html=True)
                 st.metric("Predicted Score", f"{int(away_score)}")
                 
                 st.caption("Active Roster (Top Predictions)")
@@ -143,7 +155,7 @@ with tab1:
 
             # --- HOME TEAM ---
             with col2:
-                st.subheader(f"Home: {home_name}")
+                st.markdown(f"<h3 style='color: {home_color}'>{home_icon}Home: {home_name}</h3>", unsafe_allow_html=True)
                 st.metric("Predicted Score", f"{int(home_score)}")
                 
                 st.caption("Active Roster (Top Predictions)")
