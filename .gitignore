@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+
+# Data & Database
+nba_stats.db
+data/
+
+# Logs
+logs/
+pipeline_log.txt
+
+# Dynamic Outputs
+todays_games.csv
+todays_rosters.csv
+final_predictions.csv
+injuries.csv
+
+# History (Optional: Remove if you want to track history)
+history/
+
+# Environment
+.env
+venv/

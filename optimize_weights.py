@@ -24,28 +24,40 @@ def ensure_team_exists(weights, team_id):
     tid = str(team_id)
     if tid not in weights:
         weights[tid] = {
-            "STARTER": {"L3_Weight": 0.5, "L10_Weight": 0.5},
-            "BENCH":   {"L3_Weight": 0.5, "L10_Weight": 0.5}
+            "HOME": {
+                "STARTER": {"L3_Weight": 0.5, "L10_Weight": 0.5},
+                "BENCH":   {"L3_Weight": 0.5, "L10_Weight": 0.5}
+            },
+            "AWAY": {
+                "STARTER": {"L3_Weight": 0.5, "L10_Weight": 0.5},
+                "BENCH":   {"L3_Weight": 0.5, "L10_Weight": 0.5}
+            }
         }
     return weights
 
-def update_weight_logic(weights, role, team_id, l3_val, l10_val, actual_score):
+def update_weight_logic(weights, role, team_id, location, l3_val, l10_val, actual_score):
     tid = str(team_id)
     err_l3 = abs(actual_score - l3_val)
     err_l10 = abs(actual_score - l10_val)
     
+    # Select the correct bucket
+    target_bucket = weights[tid][location][role]
+    
     # If L3 was better, nudge L3 up
     if err_l3 < err_l10:
-        weights[tid][role]['L3_Weight'] += LEARNING_RATE
-        weights[tid][role]['L10_Weight'] -= LEARNING_RATE
+        target_bucket['L3_Weight'] += LEARNING_RATE
+        target_bucket['L10_Weight'] -= LEARNING_RATE
     # If L10 was better, nudge L10 up
     elif err_l10 < err_l3:
-        weights[tid][role]['L3_Weight'] -= LEARNING_RATE
-        weights[tid][role]['L10_Weight'] += LEARNING_RATE
+        target_bucket['L3_Weight'] -= LEARNING_RATE
+        target_bucket['L10_Weight'] += LEARNING_RATE
         
     # Clamp to keep it sane (10% - 90%)
-    weights[tid][role]['L3_Weight'] = max(0.1, min(0.9, weights[tid][role]['L3_Weight']))
-    weights[tid][role]['L10_Weight'] = max(0.1, min(0.9, weights[tid][role]['L10_Weight']))
+    target_bucket['L3_Weight'] = max(0.1, min(0.9, target_bucket['L3_Weight']))
+    target_bucket['L10_Weight'] = max(0.1, min(0.9, target_bucket['L10_Weight']))
+    
+    # Write back
+    weights[tid][location][role] = target_bucket
     return weights
 
 def run_teacher(mode):
@@ -99,10 +111,15 @@ def run_teacher(mode):
             avg_min = history['MIN'].mean()
             
             role = get_role(avg_min)
+            
+            # Determine Location (vs. = HOME, @ = AWAY)
+            matchup = current_game['MATCHUP']
+            location = "HOME" if "vs." in matchup else "AWAY"
+            
             weights = ensure_team_exists(weights, current_game['TEAM_ID'])
             
             weights = update_weight_logic(
-                weights, role, current_game['TEAM_ID'], 
+                weights, role, current_game['TEAM_ID'], location,
                 l3_val, l10_val, current_game['PTS']
             )
             updates += 1

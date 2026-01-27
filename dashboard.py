@@ -30,6 +30,12 @@ if df is None:
     st.error("Data files not found. Run the pipeline first!")
     st.stop()
 
+# --- HOT STREAK LOGIC ---
+if not df.empty:
+    # If L3 is 25% higher than L10, they are "HOT"
+    df['Is_Hot'] = df['L3'] > (df['L10'] * 1.25)
+    df['Display_Name'] = df.apply(lambda x: f"{x['Player']} 🔥" if x['Is_Hot'] else x['Player'], axis=1)
+
 # Helper: Get Team Name
 def get_team_name(team_id):
     try:
@@ -38,7 +44,7 @@ def get_team_name(team_id):
         return f"Team {team_id}"
 
 # 3. TABS
-tab1, tab2, tab3 = st.tabs(["Game Matchups", "Brain Monitor", "Full Projections"])
+tab1, tab2, tab3, tab4 = st.tabs(["Game Matchups", "Brain Monitor", "Full Projections", "Results Validation"])
 
 # --- TAB 1: MATCHUPS & WINNERS ---
 with tab1:
@@ -64,18 +70,24 @@ with tab1:
         away_preds = df[df['TeamID'] == away_id].sort_values(by='Predicted_PTS', ascending=False)
         
         # INJURY LOGIC
-        # We need to find players in the roster for this team that match names in injuries.csv
         home_roster_ids = rosters[rosters['TeamID'] == home_id]['PLAYER'].tolist()
         away_roster_ids = rosters[rosters['TeamID'] == away_id]['PLAYER'].tolist()
         
-        # Filter injuries for this team
-        # Normalize names for comparison (strip/lower)
         active_injuries = injuries.copy()
         if not active_injuries.empty:
-            active_injuries['Player_Norm'] = active_injuries['Player'].str.lower().str.strip()
+            import unicodedata
+            def normalize_name(name):
+                if not isinstance(name, str): return ""
+                return ''.join(c for c in unicodedata.normalize('NFD', name) if unicodedata.category(c) != 'Mn').lower().strip()
+
+            active_injuries['Player_Norm'] = active_injuries['Player'].apply(normalize_name)
             
-            home_injuries = active_injuries[active_injuries['Player_Norm'].isin([x.lower().strip() for x in home_roster_ids])]
-            away_injuries = active_injuries[active_injuries['Player_Norm'].isin([x.lower().strip() for x in away_roster_ids])]
+            # Normalize roster names for comparison
+            home_roster_norm = [normalize_name(x) for x in home_roster_ids]
+            away_roster_norm = [normalize_name(x) for x in away_roster_ids]
+            
+            home_injuries = active_injuries[active_injuries['Player_Norm'].isin(home_roster_norm)]
+            away_injuries = active_injuries[active_injuries['Player_Norm'].isin(away_roster_norm)]
         else:
             home_injuries = pd.DataFrame()
             away_injuries = pd.DataFrame()
@@ -114,7 +126,7 @@ with tab1:
                 st.caption("Active Roster (Top Predictions)")
                 if not away_preds.empty:
                     st.dataframe(
-                        away_preds[['Player', 'Predicted_PTS', 'L3', 'L10', 'Role']],
+                        away_preds[['Display_Name', 'Predicted_PTS', 'L3', 'L10', 'Role']],
                         hide_index=True,
                         use_container_width=True
                     )
@@ -123,9 +135,6 @@ with tab1:
 
                 st.caption("🏥 Injury Report")
                 if not away_injuries.empty:
-                    # Rename columns for display if needed or just show relevant ones
-                    # Expected format in injuries.csv: Player, Injury, Status
-                    # Make sure to handle missing columns gratefully
                     display_cols = ['Player', 'Injury', 'Status'] 
                     valid_cols = [c for c in display_cols if c in away_injuries.columns]
                     st.dataframe(away_injuries[valid_cols], hide_index=True, use_container_width=True)
@@ -140,7 +149,7 @@ with tab1:
                 st.caption("Active Roster (Top Predictions)")
                 if not home_preds.empty:
                     st.dataframe(
-                        home_preds[['Player', 'Predicted_PTS', 'L3', 'L10', 'Role']],
+                        home_preds[['Display_Name', 'Predicted_PTS', 'L3', 'L10', 'Role']],
                         hide_index=True,
                         use_container_width=True
                     )
@@ -166,6 +175,7 @@ with tab2:
             team_name = get_team_name(tid)
             
             # Get avg weight for this team's starters
+            # [NOTE]: We don't distinguish Home/Away here for simplicity, just show the weight used for THIS prediction
             team_data = df[(df['TeamID'] == tid) & (df['Role'] == 'STARTER')]
             if not team_data.empty:
                 w_form = team_data.iloc[0]['Weight_Form']
@@ -176,7 +186,7 @@ with tab2:
 with tab3:
     st.subheader("All Predictions")
     st.dataframe(
-        df[['Player', 'Predicted_PTS', 'L3', 'L10', 'Role', 'Weight_Form']],
+        df[['Display_Name', 'Predicted_PTS', 'L3', 'L10', 'Role', 'Weight_Form']],
         column_config={
             "Weight_Form": st.column_config.ProgressColumn(
                 "Trust in Form",
@@ -188,3 +198,97 @@ with tab3:
         hide_index=True,
         use_container_width=True
     )
+
+
+# --- TAB 4: RESULTS VALIDATION ---
+with tab4:
+    st.header("✅ Prediction vs Reality")
+    
+    # Date Selection
+    import datetime
+    import os
+    import sqlite3
+    from nba_api.stats.static import players
+    
+    # Default to yesterday
+    default_date = datetime.date.today()
+    selected_date = st.date_input("Select Date", default_date)
+    date_str = selected_date.strftime("%Y-%m-%d")
+    
+    history_file = f"history/preds_{date_str}.csv"
+    
+    if not os.path.exists(history_file):
+        st.warning(f"No predictions found for {date_str}. (File: {history_file})")
+    else:
+        # Load Predictions
+        hist_df = pd.read_csv(history_file)
+        
+        # Load Actuals from DB
+        try:
+            conn = sqlite3.connect('nba_stats.db')
+            # Convert date format if needed. DB uses 'Jan 14, 2026' or similar? 
+            # inspect_db output showed 'Jan 14, 2026'. 
+            # We need to convert YYYY-MM-DD to 'MMM DD, YYYY'.
+            db_date_str = selected_date.strftime("%b %d, %Y")
+            
+            query = f"SELECT * FROM player_logs WHERE GAME_DATE = '{db_date_str}'"
+            actuals_df = pd.read_sql(query, conn)
+            conn.close()
+            
+            if actuals_df.empty:
+                # SPECIAL MESSAGE FOR USER REQUEST
+                st.info(f"Since you only have history for {date_str} (Today), you won't see much 'Results' for it yet until the games happen.")
+            else:
+                # Perform Matching
+                st.write(f"Found {len(actuals_df)} player records for {db_date_str}.")
+                
+                # 1. Map Prediction Names -> IDs
+                # Get all players for robust matching
+                all_players = players.get_players()
+                
+                import unicodedata
+                def normalize(name):
+                    if not isinstance(name, str): return ""
+                    return ''.join(c for c in unicodedata.normalize('NFD', name) if unicodedata.category(c) != 'Mn').lower().replace('.','').strip()
+                
+                # Create Map: Normalized Name -> ID
+                name_map = {normalize(p['full_name']): p['id'] for p in all_players}
+                
+                results = []
+                
+                for _, row in hist_df.iterrows():
+                    p_name = row['Player']
+                    p_norm = normalize(p_name)
+                    p_id = name_map.get(p_norm)
+                    
+                    if p_id:
+                        # Find in actuals
+                        match = actuals_df[actuals_df['Player_ID'] == p_id]
+                        if not match.empty:
+                            actual_pts = match.iloc[0]['PTS']
+                            diff = actual_pts - row['Predicted_PTS']
+                            results.append({
+                                'Player': p_name,
+                                'Predicted': row['Predicted_PTS'],
+                                'Actual': actual_pts,
+                                'Diff': round(diff, 1),
+                                'Abs_Diff': abs(diff)
+                            })
+                
+                if results:
+                    res_df = pd.DataFrame(results)
+                    mae = res_df['Abs_Diff'].mean()
+                    
+                    st.metric("Mean Absolute Error (MAE)", f"{mae:.2f} pts")
+                    
+                    st.dataframe(
+                        res_df[['Player', 'Predicted', 'Actual', 'Diff']].sort_values(by='Abs_Diff'),
+                        use_container_width=True
+                    )
+                else:
+                    st.warning("Could not match any players between Predictions and Results.")
+
+        except Exception as e:
+            st.error(f"Error checking results: {str(e)}")
+
+
