@@ -1,0 +1,9 @@
+pandas
+streamlit
+nba_api
+requests
+lxml
+html5lib
+BeautifulSoup4
+matplotlib
+setuptools
