@@ -57,10 +57,34 @@ with tab1:
     if games.empty:
         st.warning("No games found.")
     
+    # Prepare Dropdown Options
+    game_options = ["All Games"]
+    game_map = {} # Map "Away @ Home" -> GameID
+    
+    if not games.empty:
+        for idx, row in games.iterrows():
+            h_name = get_team_name(row['HOME_TEAM_ID'])
+            a_name = get_team_name(row['VISITOR_TEAM_ID'])
+            label = f"{a_name} @ {h_name}"
+            game_options.append(label)
+            game_map[label] = row['GAME_ID']
+
+    # Dropdown
+    selected_game = st.selectbox("🏀 Select Matchup:", game_options)
+
+    # Filter Games
+    if selected_game != "All Games":
+        target_id = game_map[selected_game]
+        games = games[games['GAME_ID'] == target_id]
+
+    if games.empty:
+        st.warning("No games found.")
+    
     # Loop through games
     for index, row in games.iterrows():
         home_id = row['HOME_TEAM_ID']
         away_id = row['VISITOR_TEAM_ID']
+        game_time = row.get('GAME_STATUS_TEXT', 'Time TBD') # Get Start Time
         
         home_name = get_team_name(home_id)
         away_name = get_team_name(away_id)
@@ -112,6 +136,7 @@ with tab1:
             col_head1, col_head2, col_head3 = st.columns([1, 2, 1])
             with col_head2:
                 st.markdown(f"<h3 style='text-align: center'>{away_name} @ {home_name}</h3>", unsafe_allow_html=True)
+                st.markdown(f"<p style='text-align: center; color: #888;'>⏰ {game_time}</p>", unsafe_allow_html=True)
                 
                 # Winner Banner
                 st.info(f"🏆 **Prediction**: {winner} by {spread:.1f} pts")

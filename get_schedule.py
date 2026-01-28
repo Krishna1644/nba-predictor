@@ -17,7 +17,7 @@ games_df = board.game_header.get_data_frame()
 # 3. Save
 if not games_df.empty:
     # Select columns
-    summary = games_df[['GAME_DATE_EST', 'GAME_ID', 'HOME_TEAM_ID', 'VISITOR_TEAM_ID']]
+    summary = games_df[['GAME_DATE_EST', 'GAME_ID', 'HOME_TEAM_ID', 'VISITOR_TEAM_ID', 'GAME_STATUS_TEXT']]
     
     # --- THE FIX: REMOVE DUPLICATES ---
     # The API returns one row per TV station (ESPN, TNT, Local).
