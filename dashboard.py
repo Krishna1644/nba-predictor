@@ -7,7 +7,7 @@ st.set_page_config(page_title="NBA AI Predictor", layout="wide")
 st.title("🏀 NBA Self-Learning Engine")
 
 # 2. LOAD DATA
-@st.cache_data
+@st.cache_data(ttl=600) # Clear cache every 10 mins
 def load_data():
     try:
         preds = pd.read_csv('final_predictions.csv')
