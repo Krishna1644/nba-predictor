@@ -296,10 +296,10 @@ with tab3:
                     client = genai.Client()
                     
                     models_to_try = [
+                        'gemini-3.0-flash',
                         'gemini-2.5-flash',
-                        'gemini-2.0-flash-lite',
-                        'gemini-flash-latest',
-                        'gemini-pro-latest'
+                        'gemini-3.1-flash-lite',
+                        'gemini-2.5-flash-lite'
                     ]
                     
                     response = None
