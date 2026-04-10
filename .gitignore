@@ -22,3 +22,9 @@ pipeline_log.txt
 # Environment
 .env
 venv/
+.streamlit/
+
+# LSTM Model Artifacts
+models/
+*.npy
+schedule_context.csv

@@ -1,0 +1,16 @@
+GAME_ID,Home_Team,Away_Team,Home_Win_Prob,Away_Win_Prob,Predicted_Winner,Confidence
+22501171,Charlotte Hornets,Detroit Pistons,0.4551,0.5449,Detroit Pistons,0.5449
+22501172,Washington Wizards,Miami Heat,0.3994,0.6006,Miami Heat,0.6006
+22501173,Atlanta Hawks,Cleveland Cavaliers,0.4586,0.5414,Cleveland Cavaliers,0.5414
+22501174,Boston Celtics,New Orleans Pelicans,0.6961,0.3039,Boston Celtics,0.6961
+22501175,Indiana Pacers,Philadelphia 76ers,0.4273,0.5727,Philadelphia 76ers,0.5727
+22501176,New York Knicks,Toronto Raptors,0.5614,0.4386,New York Knicks,0.5614
+22501177,Chicago Bulls,Orlando Magic,0.4612,0.5388,Orlando Magic,0.5388
+22501179,Milwaukee Bucks,Brooklyn Nets,0.519,0.481,Milwaukee Bucks,0.519
+22501180,San Antonio Spurs,Dallas Mavericks,0.699,0.301,San Antonio Spurs,0.699
+22501182,Denver Nuggets,Oklahoma City Thunder,0.4202,0.5798,Oklahoma City Thunder,0.5798
+22501178,Houston Rockets,Minnesota Timberwolves,0.5014,0.4986,Houston Rockets,0.5014
+22501181,Utah Jazz,Memphis Grizzlies,0.5077,0.4923,Utah Jazz,0.5077
+22501183,Portland Trail Blazers,Los Angeles Clippers,0.503,0.497,Portland Trail Blazers,0.503
+22501184,Sacramento Kings,Golden State Warriors,0.3754,0.6246,Golden State Warriors,0.6246
+22501185,Los Angeles Lakers,Phoenix Suns,0.5132,0.4868,Los Angeles Lakers,0.5132

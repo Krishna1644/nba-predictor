@@ -2,13 +2,12 @@ import os
 import sys
 import subprocess
 import datetime
-import glob
-import pandas as pd
 
 # CONFIG
 HISTORY_DIR = "history"
 DATA_DIR = "data"
 LOG_FILE = "logs/pipeline_log.txt"
+MODELS_DIR = "models"
 
 def log(message):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -20,7 +19,7 @@ def log(message):
         f.write(full_msg + "\n")
 
 def ensure_folders():
-    for folder in [HISTORY_DIR, DATA_DIR, "logs"]:
+    for folder in [HISTORY_DIR, DATA_DIR, "logs", MODELS_DIR]:
         if not os.path.exists(folder):
             os.makedirs(folder)
 
@@ -33,70 +32,62 @@ def run_script(script_name, args=[]):
         if result.returncode != 0:
             log(f"ERROR in {script_name}:\n{result.stderr}")
             return False
+        if result.stdout:
+            # Print key lines from script output
+            for line in result.stdout.strip().split('\n'):
+                log(f"  > {line}")
         return True
     except Exception as e:
         log(f"CRITICAL FAIL: {e}")
         return False
 
-def check_last_run_status():
-    """
-    Returns 'DAILY' if we have yesterday's file.
-    Returns 'RESET' if the file is missing or old.
-    """
-    files = glob.glob(f"{HISTORY_DIR}/*.csv")
-    if not files:
-        log("No history found. Triggering RESET.")
-        return "RESET"
+def check_model_exists():
+    """Pre-flight check: ensure LSTM model artifacts are present."""
+    model_path = os.path.join(MODELS_DIR, 'lstm_model.keras')
+    scaler_path = os.path.join(MODELS_DIR, 'scaler.pkl')
     
-    latest_file = max(files, key=os.path.getctime)
+    if not os.path.exists(model_path):
+        log(f"MODEL NOT FOUND: {model_path}")
+        log("Train the model in Colab first, then place files in models/")
+        return False
+    if not os.path.exists(scaler_path):
+        log(f"SCALER NOT FOUND: {scaler_path}")
+        return False
     
-    try:
-        filename = os.path.basename(latest_file)
-        date_str = filename.replace("preds_", "").replace(".csv", "")
-        last_date = datetime.datetime.strptime(date_str, "%Y-%m-%d").date()
-        today = datetime.date.today()
-        
-        diff = (today - last_date).days
-        
-        if diff <= 1:
-            log(f"Found recent history ({last_date}). Running DAILY update.")
-            return "DAILY"
-        else:
-            log(f"Last run was {diff} days ago. Gap too large. Triggering RESET.")
-            return "RESET"
-            
-    except Exception as e:
-        log(f"Error checking dates ({e}). Defaulting to RESET.")
-        return "RESET"
+    log(f"Model found: {model_path}")
+    return True
 
 def main():
     ensure_folders()
-    log("=== PIPELINE STARTED ===")
+    log("=== PIPELINE STARTED (LSTM) ===")
     
-    # 1. ALWAYS Fetch Fresh Data (Rosters, Injuries, Stats)
-    run_script("get_schedule.py")
+    # 1. Pre-flight: Check for trained model
+    if not check_model_exists():
+        log("ABORTING: No trained model. Run train_lstm.py in Colab first.")
+        return
+    
+    # 2. Fetch Fresh Data
+    log(">>> STEP 1: Fetching schedule...")
+    if not run_script("get_schedule.py"):
+        log("Schedule fetch failed. Aborting.")
+        return
+
+    log(">>> STEP 2: Fetching rosters...")
     run_script("fetch_rosters.py")
+    
+    log(">>> STEP 3: Fetching injuries...")
     run_script("fetch_injuries.py")
     
-    # Critical: Stats fetcher now grabs 82 games
+    log(">>> STEP 4: Refreshing player stats...")
     if not run_script("fetch_player_stats.py"): 
         log("Stats fetch failed. Aborting.")
         return
 
-    # 2. DECIDE MODE
-    mode = check_last_run_status()
-    
-    # 3. RUN TEACHER
-    if mode == "RESET":
-        log(">>> ENTERING PART 1: SEASON REPLAY")
-        if not run_script("optimize_weights.py", ["--mode", "replay"]): return
-    else:
-        log(">>> ENTERING PART 2: DAILY UPDATE")
-        if not run_script("optimize_weights.py", ["--mode", "daily"]): return
-
-    # 4. PREDICT
-    log(">>> GENERATING PREDICTIONS")
-    if not run_script("predict_tonight.py"): return
+    # 3. Generate Predictions
+    log(">>> STEP 5: Running LSTM predictions...")
+    if not run_script("predict_tonight.py"):
+        log("Prediction failed.")
+        return
     
     log("=== PIPELINE COMPLETE ===")
 
