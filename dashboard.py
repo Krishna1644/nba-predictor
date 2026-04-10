@@ -272,7 +272,19 @@ with tab3:
             context_payload += "--- TONIGHT'S PIPELINE PREDICTIONS ---\n"
             context_payload += preds_df.to_string(index=False) + "\n\n"
             context_payload += "--- KEY INJURIES (TONIGHT) ---\n"
-            context_payload += injuries.to_string(index=False) + "\n\n"
+            if not injuries.empty and not rosters.empty:
+                roster_team_map = {}
+                for _, r in rosters.iterrows():
+                    roster_team_map[norm_name(r['PLAYER'])] = get_team_name(r['TeamID'])
+                
+                mapped_injuries = []
+                for _, inj in injuries.iterrows():
+                    p_name = norm_name(inj['Player'])
+                    t_name = roster_team_map.get(p_name, "Unknown/Free Agent")
+                    mapped_injuries.append({'Player': inj['Player'], 'Team': t_name, 'Injury': inj['Injury'], 'Status': inj['Status']})
+                context_payload += pd.DataFrame(mapped_injuries).to_string(index=False) + "\n\n"
+            else:
+                context_payload += injuries.to_string(index=False) + "\n\n"
             context_payload += "--- CURRENT SEASON TEAM STATS (2025-26) ---\n"
             if not season_stats_df.empty:
                 context_payload += season_stats_df[['TEAM_ABBR', 'Win%', 'PPG', 'DIFF', 'eFG%', 'TS%', 'TOV%']].to_string(index=False) + "\n"
