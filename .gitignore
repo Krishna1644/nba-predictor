@@ -26,5 +26,6 @@ venv/
 
 # LSTM Model Artifacts
 models/
+!models/elo_ratings.json
 *.npy
 schedule_context.csv
