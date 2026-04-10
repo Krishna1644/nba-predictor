@@ -272,7 +272,7 @@ with tab3:
             context_payload += "--- TONIGHT'S PIPELINE PREDICTIONS ---\n"
             context_payload += preds_df.to_string(index=False) + "\n\n"
             context_payload += "--- KEY INJURIES (TONIGHT) ---\n"
-            context_payload += injuries.head(20).to_string(index=False) + "\n\n"
+            context_payload += injuries.to_string(index=False) + "\n\n"
             context_payload += "--- CURRENT SEASON TEAM STATS (2025-26) ---\n"
             if not season_stats_df.empty:
                 context_payload += season_stats_df[['TEAM_ABBR', 'Win%', 'PPG', 'DIFF', 'eFG%', 'TS%', 'TOV%']].to_string(index=False) + "\n"
