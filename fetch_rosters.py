@@ -26,7 +26,7 @@ for team_id in team_ids:
     
     try:
         # Call API for this team's roster
-        roster_endpoint = commonteamroster.CommonTeamRoster(team_id=team_id)
+        roster_endpoint = commonteamroster.CommonTeamRoster(team_id=team_id, season='2025-26')
         
         # --- FIX IS HERE: use get_data_frames()[0] ---
         roster_frames = roster_endpoint.get_data_frames()
