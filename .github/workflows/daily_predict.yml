@@ -1,5 +1,6 @@
-# Nightly: refresh schedule/injuries/stats → predict → commit data/live for Streamlit.
-# Does NOT retrain. Uses in-repo slim DB (data/nba_stats_live.db.gz), not full history.
+# Nightly: ESPN extract (cloud-safe) → predict → commit data/live for Streamlit.
+# Does NOT call stats.nba.com (blocked on GHA IPs). Does NOT retrain.
+# Uses in-repo slim DB (data/nba_stats_live.db.gz) for priors / rest / rosters.
 name: Daily predict
 
 on:
@@ -40,17 +41,17 @@ jobs:
           fi
           ls -lh nba_stats.db
 
-      - name: Run daily pipeline
-        run: python run_pipeline.py
+      - name: Extract (ESPN) + predict
+        run: python run_pipeline.py --source espn --skip-stats
         env:
           PYTHONUNBUFFERED: "1"
 
       - name: Commit live predictions
         run: |
-          mkdir -p data/live history
+          mkdir -p data/live data/injury_snapshots history
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f data/live/*.csv history/preds_*.csv models/elo_ratings.json || true
+          git add -f data/live/*.csv data/injury_snapshots/*.csv history/preds_*.csv models/elo_ratings.json || true
           if git diff --staged --quiet; then
             echo "No prediction file changes."
           else

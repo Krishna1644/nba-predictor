@@ -29,39 +29,35 @@ LIVE_SEASON_ID = "22026"
 
 
 def get_team_name(team_id):
-    try:
-        from nba_api.stats.static import teams
+    from nba_ml.team_ids import team_name
 
-        info = teams.find_team_name_by_id(team_id)
-        return info["full_name"] if info else f"Team {team_id}"
-    except Exception:
-        return f"Team {team_id}"
+    return team_name(int(team_id))
 
 
 def team_abbr_from_id(team_id) -> str | None:
-    try:
-        from nba_api.stats.static import teams
+    from nba_ml.team_ids import team_abbr
 
-        info = teams.find_team_name_by_id(int(team_id))
-        return info["abbreviation"] if info else None
-    except Exception:
-        return None
+    return team_abbr(int(team_id))
 
 
 def load_schedule_ctx():
-    try:
-        ctx = pd.read_csv("schedule_context.csv")
-        out = {}
-        for r in ctx.itertuples():
-            rest = int(min(int(r.rest_days), REST_DAYS_CAP))
-            out[int(r.TEAM_ID)] = {
-                "rest_days": rest,
-                "is_back_to_back": int(r.is_back_to_back),
-                "games_last_7": int(r.games_last_7),
-            }
-        return out
-    except Exception:
-        return {}
+    for path in ("schedule_context.csv", os.path.join("data", "live", "schedule_context.csv")):
+        try:
+            if not os.path.exists(path):
+                continue
+            ctx = pd.read_csv(path)
+            out = {}
+            for r in ctx.itertuples():
+                rest = int(min(int(r.rest_days), REST_DAYS_CAP))
+                out[int(r.TEAM_ID)] = {
+                    "rest_days": rest,
+                    "is_back_to_back": int(r.is_back_to_back),
+                    "games_last_7": int(r.games_last_7),
+                }
+            return out
+        except Exception:
+            continue
+    return {}
 
 
 def rolling_form_from_db(conn, team_abbr: str) -> dict:
@@ -155,10 +151,24 @@ def main():
 
         feature_cols = MATCHUP_CORE_FEATURES + [ABSENCE_FEATURE_PLAYER]
 
-    games = pd.read_csv("todays_games.csv")
-    rosters = pd.read_csv("todays_rosters.csv")
+    def _read_csv(*names: str) -> pd.DataFrame:
+        for n in names:
+            if os.path.exists(n):
+                return pd.read_csv(n)
+        raise FileNotFoundError(names[0])
+
+    games = _read_csv("todays_games.csv", os.path.join("data", "live", "todays_games.csv"))
     try:
-        injuries = pd.read_csv("injuries.csv")
+        rosters = _read_csv(
+            "todays_rosters.csv", os.path.join("data", "live", "todays_rosters.csv")
+        )
+    except FileNotFoundError:
+        print("  [WARNING] todays_rosters.csv missing.")
+        rosters = pd.DataFrame()
+    try:
+        injuries = _read_csv(
+            "injuries.csv", os.path.join("data", "live", "injuries.csv")
+        )
     except Exception:
         print("  [WARNING] injuries.csv missing — deficits will be 0.")
         injuries = pd.DataFrame()
