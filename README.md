@@ -37,7 +37,7 @@ Plots / JSON: `artifacts/calibration_holdout.png`, `artifacts/feature_selection.
 
 ---
 
-## What recruiters should notice
+## Key Changes
 
 1. **Leakage was fixed, not papered over.** Early versions used season-long starter minutes and a non-time split. Those bugs are documented below; features are pre-game only now.
 2. **The deep model lost.** BiLSTM + Attention was trained and evaluated on the same holdout. Logistic + Elo won, so production is logistic — the README says so.
