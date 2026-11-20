@@ -2,7 +2,7 @@
 
 Portfolio project: **predict regular-season NBA winners** with honest evaluation, leak-safe features, and a live Streamlit dashboard that refreshes daily.
 
-**Live app:** deploy `dashboard.py` on [Streamlit Community Cloud](https://streamlit.io/cloud) from this repo (`main`).  
+**Live app:** deploy `dashboard.py` on [Streamlit Community Cloud](https://nba-predictor-3w.streamlit.app/) from this repo (`main`).  
 **Production model:** logistic regression + **efficiency-weighted player deficit** (VAL-selected). Calibration = **none** (raw logistic beat Platt/isotonic on VAL).  
 **Not production:** BiLSTM + Attention — kept as a comparison that did **not** win.
 
