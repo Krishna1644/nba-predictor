@@ -2,36 +2,36 @@
 
 Predicts regular-season NBA game winners with **calibrated home-win probabilities**.
 
-**Production model:** logistic + Platt calibration, **efficiency-weighted player deficit**  
+**Production model:** logistic (VAL-selected calib = none this round), **efficiency-weighted player deficit**  
 **Not production:** BiLSTM + Attention (comparison only)
 
-### 2024-25 report (n=1225) — not used for selection
+### 2025-26 report (n=1225) — not used for selection
 
 | Model | Accuracy | Log loss | Brier | AUC |
 | --- | ---: | ---: | ---: | ---: |
-| Elo only | 0.642 | 0.6280 | 0.2193 | 0.715 |
-| **Logistic efficiency + Platt (shipped)** | **0.678** | **0.5959** | **0.2054** | **0.739** |
-| Counting impact (not selected) | 0.675 | 0.5967 | 0.2058 | 0.738 |
-| Minutes deficit (not selected) | 0.667 | 0.6002 | 0.2072 | 0.735 |
+| Elo only | 0.660 | 0.6174 | 0.2136 | 0.726 |
+| **Logistic efficiency (shipped)** | **0.685** | **0.5913** | **0.2032** | **0.742** |
+| Counting impact (not selected) | 0.684 | 0.5920 | 0.2034 | 0.742 |
+| Minutes deficit (not selected) | 0.681 | 0.5946 | 0.2043 | 0.740 |
 
 ### Validation selection notes
 
 | Absence value | VAL log loss | VAL Brier |
 | --- | ---: | ---: |
-| **Efficiency (shipped)** | **0.6201** | **0.2157** |
-| Counting | 0.6207 | 0.2159 |
-| Minutes | 0.6225 | 0.2167 |
+| **Efficiency (shipped)** | **0.6008** | **0.2074** |
+| Counting | 0.6016 | 0.2077 |
+| Minutes | 0.6044 | 0.2089 |
 
-- Paired bootstrap Δll(efficiency − counting): **−0.0006 [−0.0012, 0.0000]** (1000 resamples).
-- Calibration on VAL: **Platt (sigmoid)**; isotonic worse.
-- **2025-26 frozen** (not scored).
+- Paired bootstrap Δll(efficiency − counting): **−0.0008 [−0.0013, −0.0003]** (1000 resamples).
+- Calibration on VAL: **none** edged Platt/sigmoid; isotonic worse. Re-checked each retrain.
+- Train/val pool: seasons **2015-16 → 2024-25** (`SEASON_ID <= 22024`).
+- **2025-26 is report-only** (never used to pick features / calib).
+- **Live:** 2026-27 (`fetch_*` + `run_pipeline.py`).
 - Replacement-at-position: **skipped** (no reliable position in box logs).
 
 **Efficiency formula (shipped):**  
 `PTS + 0.4·FGM − 0.7·FGA − 0.4·(FTA−FTM) + 0.7·OREB + 0.3·DREB + STL + 0.7·AST + 0.7·BLK − 0.4·PF − TOV`  
 (pre-game blend `w = gp/(gp+10)`).
-
-Counting (retired from production): `PTS + 1.5·AST + REB + STL + BLK − TOV`.
 
 Calibration plot: `artifacts/calibration_holdout.png`. Details: `artifacts/feature_selection.json`.
 
@@ -45,7 +45,7 @@ Earlier versions had real methodology bugs:
 2. **Train/val split was a row cut after concatenating teams**, not a time split.
 3. **Home/away LSTM scores were forced to sum to 1** instead of modeling the matchup jointly.
 
-Those are fixed. Features are pre-game only. Evaluation is a **season holdout** (train through 2023-24, test 2024-25). The deep model had to beat Elo and logistic — it did not, so the README and dashboard tell that story instead of hiding it.
+Those are fixed. Features are pre-game only. Evaluation is a **season holdout**. The deep model had to beat Elo and logistic — it did not, so the README and dashboard tell that story instead of hiding it.
 
 ---
 
@@ -54,14 +54,13 @@ Those are fixed. Features are pre-game only. Evaluation is a **season holdout** 
 | | |
 | --- | --- |
 | **Task** | P(home team wins) for NBA regular-season games |
-| **Data** | `nba_api` LeagueGameLog player box scores, seasons 2015-16 → 2025-26 in SQLite |
+| **Data** | `nba_api` LeagueGameLog player box scores in SQLite |
 | **Grain** | One row per game (home vs away) |
 | **Label** | `home_win` |
-| **Features** | Elo diff, rest / B2B / games-in-7 diffs (rest capped at 7), impact-weighted player deficit diff, rolling form diffs |
-| **Train window** | Seasons ≤ 2023-24 (chronological val = last 20% of train dates) |
-| **Report test** | 2024-25 full season |
-| **Frozen eval** | 2025-26 (untouched until deliberate one-shot) |
-| **Live** | 2026-27 when fetched |
+| **Features** | Elo diff, rest / B2B / games-in-7 diffs (rest capped at 7), efficiency player deficit diff, rolling form diffs |
+| **Train window** | Seasons 2015-16 → 2024-25 (chronological val = last 20% of those dates) |
+| **Report test** | 2025-26 full season (selection-free) |
+| **Live** | 2026-27 |
 | **Metrics** | Log loss, Brier, AUC, accuracy, calibration curve |
 | **Known limits** | Train uses box-score DNP as Out proxy; serve uses Status=`Out`. No lineup role reassignment. No position-based replacement. No market odds. |
 
@@ -70,6 +69,8 @@ Those are fixed. Features are pre-game only. Evaluation is a **season holdout** 
 - Player priors = expanding means from **games played only**, blended with prior season via `gp/(gp+10)`.
 - Elo / opponent strength / rest are **pre-game**; rest_days capped at 7.
 - Rolling form uses `shift(1)` so the current game’s box score is never a feature for itself.
+
+**Retrain vs daily refresh:** scoring games or running the nightly pipeline does **not** change logistic weights. Nightly runs refresh schedule / injuries / priors from new box scores. Weights change only when you deliberately run `train_baseline.py`.
 
 ---
 
@@ -87,7 +88,7 @@ python build_datasets.py
 python train_baseline.py
 python evaluate_holdout.py          # writes artifacts/holdout_metrics.*
 
-# Daily predictions (needs todays_*.csv from the fetch scripts):
+# Daily predictions:
 python run_pipeline.py
 streamlit run dashboard.py
 ```
@@ -97,6 +98,27 @@ Optional LSTM comparison (needs TensorFlow):
 ```bash
 python train_lstm.py --epochs 40
 python evaluate_holdout.py
+```
+
+---
+
+## Auto-update the website (daily)
+
+The Streamlit app reads **precomputed CSVs** under `data/live/` (fallback: repo root). It does not retrain.
+
+1. Deploy the app on [Streamlit Community Cloud](https://streamlit.io/cloud) from this repo (`dashboard.py`).
+2. Enable GitHub Action `.github/workflows/daily_predict.yml` (cron ~14:00 UTC / workflow_dispatch).
+3. Slim DB is **committed** as `data/nba_stats_live.db.gz` (~3MB; last 2–3 seasons only). Refresh with:
+   ```bash
+   python scripts/export_live_db.py
+   ```
+   Full `nba_stats.db` stays local for training — daily Actions never need 2015–23.
+4. Streamlit Cloud redeploys when Actions commits `data/live/`; cache TTL is 10 minutes.
+
+Local equivalent:
+
+```bash
+python run_pipeline.py   # writes final_predictions.csv and data/live/
 ```
 
 ---
@@ -112,8 +134,9 @@ python evaluate_holdout.py
 | `train_lstm.py` | BiLSTM + Attention (research / comparison) |
 | `evaluate_holdout.py` | Holdout leaderboard |
 | `predict_matchup.py` | Production inference |
-| `predict_tonight.py` | Legacy LSTM inference (optional) |
+| `run_pipeline.py` | Daily fetch + predict |
 | `dashboard.py` | Streamlit UI |
+| `data/live/` | Tracked nightly outputs for the website |
 | `artifacts/` | Holdout metrics, calibration plots, preds |
 | `_archive/` | Old heuristic weight tuner (retired) |
 
@@ -121,24 +144,16 @@ python evaluate_holdout.py
 
 ## Data note (BigData / 1946–2026 dump)
 
-A separate Kaggle dump (`nba-data-1946-2026`) has 1.5M+ player-gamelog rows back to the 1940s. **This repo does not use it.** Reasons:
-
-- Schema differs (no clean `MATCHUP`/`WL` without joining `dim_games`).
-- Pre-3PT / different-pace eras hurt a modern win model more than they help.
-- The local `nba_stats.db` already covers **2015-16 → 2025-26**, which is enough for Elo warm-up + a full held-out season.
-
-Using 1960s box scores here would be portfolio theater, not better science.
+A separate Kaggle dump (`nba-data-1946-2026`) has 1.5M+ player-gamelog rows back to the 1940s. **This repo does not use it.** Local `nba_stats.db` covers modern seasons needed for Elo warm-up + holdout.
 
 ---
 
 ## Deploy
 
-This app is **Streamlit + sklearn**, not a Vercel serverless app. Free options that fit:
+This app is **Streamlit + sklearn**, not a Vercel serverless app:
 
 - [Streamlit Community Cloud](https://streamlit.io/cloud) (best match)
 - Render / Railway free tier
-
-Vercel would require rewriting to FastAPI/static; TensorFlow does not belong on free serverless even if you keep the LSTM around for research.
 
 ---
 

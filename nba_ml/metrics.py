@@ -49,7 +49,7 @@ def save_calibration_plot(y_true, prob_dict: dict, out_path: str, n_bins: int = 
         ax.plot(mean_pred, frac_pos, marker="o", label=name)
     ax.set_xlabel("Predicted home-win probability")
     ax.set_ylabel("Observed home-win rate")
-    ax.set_title("Calibration (2024-25 holdout)")
+    ax.set_title("Calibration (2025-26 holdout)")
     ax.legend(loc="best")
     ax.grid(True, alpha=0.3)
     fig.tight_layout()

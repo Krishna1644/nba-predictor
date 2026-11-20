@@ -241,10 +241,21 @@ def main():
 
     out = pd.DataFrame(preds)
     out.to_csv("final_predictions.csv", index=False)
+    live_dir = os.path.join("data", "live")
+    os.makedirs(live_dir, exist_ok=True)
+    out.to_csv(os.path.join(live_dir, "final_predictions.csv"), index=False)
+    for src in (
+        "todays_games.csv",
+        "todays_rosters.csv",
+        "injuries.csv",
+        "schedule_context.csv",
+    ):
+        if os.path.exists(src):
+            pd.read_csv(src).to_csv(os.path.join(live_dir, src), index=False)
     os.makedirs(HISTORY_DIR, exist_ok=True)
     stamp = datetime.date.today().isoformat()
     out.to_csv(os.path.join(HISTORY_DIR, f"preds_{stamp}.csv"), index=False)
-    print(f"\n[SUCCESS] Wrote final_predictions.csv ({len(out)} games)")
+    print(f"\n[SUCCESS] Wrote final_predictions.csv + data/live/ ({len(out)} games)")
 
 
 if __name__ == "__main__":

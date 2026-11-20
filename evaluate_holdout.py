@@ -1,5 +1,5 @@
 """
-Compare Elo, logistic, and LSTM on the 2024-25 holdout season.
+Compare Elo, logistic, and LSTM on the 2025-26 holdout season.
 
 LSTM matchup probability: predict home and away sequences independently,
 then renormalize (same as predict_tonight.py) so we evaluate the shipped rule.
@@ -61,7 +61,7 @@ def lstm_matchup_probs(model, X_test, meta_test: pd.DataFrame):
 
 def main():
     print("=" * 60)
-    print("  HOLDOUT EVAL — 2024-25")
+    print("  HOLDOUT EVAL — 2025-26")
     print("=" * 60)
 
     baseline = pd.read_csv(os.path.join(DATA_DIR, "holdout_baseline_preds.csv"))

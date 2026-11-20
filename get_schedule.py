@@ -1,5 +1,6 @@
 from nba_api.stats.endpoints import scoreboardv2
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import pandas as pd
 import sqlite3
 import numpy as np
@@ -7,10 +8,8 @@ import numpy as np
 # CONFIG
 DB_NAME = "nba_stats.db"
 
-# 1. Get "NBA Time" (ET)
-# Adjusting to ensure we get the correct "NBA Day"
-utc_now = datetime.utcnow()
-nba_time = utc_now - timedelta(hours=5) 
+# 1. Get "NBA Time" (America/New_York — handles EST/EDT)
+nba_time = datetime.now(ZoneInfo("America/New_York"))
 today_str = nba_time.strftime('%Y-%m-%d')
 
 print(f"\nCHECKING SCHEDULE FOR: {today_str}")

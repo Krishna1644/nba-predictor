@@ -1,0 +1,59 @@
+# Nightly: refresh schedule/injuries/stats → predict → commit data/live for Streamlit.
+# Does NOT retrain. Uses in-repo slim DB (data/nba_stats_live.db.gz), not full history.
+name: Daily predict
+
+on:
+  schedule:
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  predict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Unpack slim live DB
+        run: |
+          set -e
+          if [ -f data/nba_stats_live.db.gz ]; then
+            gzip -dc data/nba_stats_live.db.gz > nba_stats.db
+          elif [ -n "${{ secrets.DB_RELEASE_URL }}" ]; then
+            curl -L --fail -o nba_stats.db "${{ secrets.DB_RELEASE_URL }}"
+          else
+            echo "Missing data/nba_stats_live.db.gz — run: python scripts/export_live_db.py && gzip -c nba_stats_live.db > data/nba_stats_live.db.gz"
+            exit 1
+          fi
+          ls -lh nba_stats.db
+
+      - name: Run daily pipeline
+        run: python run_pipeline.py
+        env:
+          PYTHONUNBUFFERED: "1"
+
+      - name: Commit live predictions
+        run: |
+          mkdir -p data/live history
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f data/live/*.csv history/preds_*.csv models/elo_ratings.json || true
+          if git diff --staged --quiet; then
+            echo "No prediction file changes."
+          else
+            git commit -m "chore: daily live predictions $(date -u +%Y-%m-%d)"
+            git push
+          fi

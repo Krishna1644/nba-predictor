@@ -13,5 +13,5 @@ beautifulsoup4>=4.12
 setuptools>=68
 google-genai>=0.5
 pytest>=7.4
-# Optional: only needed to retrain / compare the LSTM
-tensorflow>=2.15,<2.22
+# TensorFlow is optional (LSTM comparison only). Install via:
+#   pip install -r requirements-train.txt

@@ -1,7 +1,7 @@
 """
 backfill_history.py — Multi-season historical data fetcher.
 
-Populates nba_stats.db with player game logs from 2015-16 through 2025-26.
+Populates nba_stats.db with player game logs from 2015-16 through 2026-27.
 Designed to run ONCE, separate from the daily pipeline.
 
 Uses LeagueGameLog endpoint to fetch ALL player logs for an entire 
@@ -21,7 +21,7 @@ DB_NAME = "nba_stats.db"
 SEASONS = [
     '2015-16', '2016-17', '2017-18', '2018-19', '2019-20',
     '2020-21', '2021-22', '2022-23', '2023-24', '2024-25',
-    '2025-26'
+    '2025-26', '2026-27',
 ]
 
 def compute_advanced_metrics(df):

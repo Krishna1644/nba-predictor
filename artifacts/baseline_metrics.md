@@ -1,9 +1,9 @@
 | model | n | accuracy | log_loss | brier | auc | base_rate |
 | --- | --- | --- | --- | --- | --- | --- |
-| elo_only/test_2024-25 | 1225 | 0.642 | 0.6280 | 0.2193 | 0.715 | 0.544 |
-| logistic_efficiency_sigmoid/test_2024-25 | 1225 | 0.678 | 0.5959 | 0.2054 | 0.739 | 0.544 |
-| logistic_counting/test_2024-25_not_selected | 1225 | 0.675 | 0.5967 | 0.2058 | 0.738 | 0.544 |
-| logistic_minutes/test_2024-25_not_selected | 1225 | 0.667 | 0.6002 | 0.2072 | 0.735 | 0.544 |
-| logistic_counting/val | 2189 | 0.645 | 0.6207 | 0.2159 | 0.704 | 0.556 |
-| logistic_efficiency/val | 2189 | 0.644 | 0.6201 | 0.2157 | 0.704 | 0.556 |
-| logistic_minutes/val | 2189 | 0.649 | 0.6225 | 0.2167 | 0.701 | 0.556 |
+| elo_only/test_2025-26 | 1225 | 0.660 | 0.6174 | 0.2136 | 0.726 | 0.554 |
+| logistic_efficiency_none/test_2025-26 | 1225 | 0.685 | 0.5913 | 0.2032 | 0.742 | 0.554 |
+| logistic_counting/test_2025-26_not_selected | 1225 | 0.684 | 0.5920 | 0.2034 | 0.742 | 0.554 |
+| logistic_minutes/test_2025-26_not_selected | 1225 | 0.681 | 0.5946 | 0.2043 | 0.740 | 0.554 |
+| logistic_counting/val | 2441 | 0.662 | 0.6016 | 0.2077 | 0.733 | 0.544 |
+| logistic_efficiency/val | 2441 | 0.665 | 0.6008 | 0.2074 | 0.734 | 0.544 |
+| logistic_minutes/val | 2441 | 0.664 | 0.6044 | 0.2089 | 0.730 | 0.544 |

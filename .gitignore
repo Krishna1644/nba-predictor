@@ -6,12 +6,14 @@ __pycache__/
 venv/
 .env
 
-# Secrets
+# Secrets (keep config.toml tracked)
 .streamlit/secrets.toml
-.streamlit/
 
 # Local databases & large arrays (rebuild with build_datasets.py)
 nba_stats.db
+nba_stats_live.db
+# Tracked compressed slim DB for Actions (rebuild: python scripts/export_live_db.py)
+!data/nba_stats_live.db.gz
 *.npy
 
 # Heavy intermediate artifacts (metrics/plots/csvs below are kept)
@@ -25,13 +27,16 @@ models/scaler.pkl
 !models/logistic_baseline.pkl
 !models/elo_ratings.json
 !models/logistic_coefficients.json
+!models/logistic_feature_columns.json
 
-# Daily pipeline outputs
+# Daily pipeline outputs (root copies are local-only; tracked site inputs live in data/live/)
 todays_games.csv
 todays_rosters.csv
 injuries.csv
 schedule_context.csv
 final_predictions.csv
+!data/live/
+!data/live/**
 logs/
 pipeline_log.txt
 

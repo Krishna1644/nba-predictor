@@ -83,14 +83,14 @@ MATCHUP_FEATURE_COLUMNS = MATCHUP_CORE_FEATURES + [
 ]
 
 # Seasons:
-#   train/val  <= 2023-24
-#   report test = 2024-25 (metrics only; never used for selection)
-#   frozen eval = 2025-26 (do not score until deliberate second eval)
+#   train/val  <= 2024-25
+#   report test = 2025-26 (metrics only; never used for selection)
 #   live fetch  = 2026-27
-TRAIN_SEASON_MAX = "22023"  # 2023-24
-TEST_SEASON = "22024"  # 2024-25 report
-FROZEN_EVAL_SEASON = "22025"  # 2025-26 untouched
+TRAIN_SEASON_MAX = "22024"  # through 2024-25
+TEST_SEASON = "22025"  # 2025-26 report-only
 LIVE_SEASON = "22026"  # 2026-27
+# Alias kept so older scripts/imports do not break; same as TEST_SEASON.
+FROZEN_EVAL_SEASON = TEST_SEASON
 REST_DAYS_CAP = 7
 
 # Absence / rotation rules (shared train + serve)

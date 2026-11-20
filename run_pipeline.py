@@ -63,9 +63,9 @@ def main():
     
     # 1. Pre-flight: Check for trained model
     if not check_model_exists():
-        log("ABORTING: No trained model. Run train_lstm.py in Colab first.")
+        log("ABORTING: No trained model. Run: python build_datasets.py && python train_baseline.py")
         return
-    
+
     # 2. Fetch Fresh Data
     log(">>> STEP 1: Fetching schedule...")
     if not run_script("get_schedule.py"):
@@ -74,14 +74,13 @@ def main():
 
     log(">>> STEP 2: Fetching rosters...")
     run_script("fetch_rosters.py")
-    
+
     log(">>> STEP 3: Fetching injuries...")
     run_script("fetch_injuries.py")
-    
+
     log(">>> STEP 4: Refreshing player stats...")
-    if not run_script("fetch_player_stats.py"): 
-        log("Stats fetch failed. Aborting.")
-        return
+    if not run_script("fetch_player_stats.py"):
+        log("WARNING: Stats fetch failed — continuing with existing nba_stats.db priors.")
 
     # 3. Generate Predictions (logistic matchup is the production model)
     log(">>> STEP 5: Running logistic matchup predictions...")

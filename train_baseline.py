@@ -1,6 +1,7 @@
 """
 Train Elo + logistic. VAL picks among counting impact / efficiency impact / minutes.
-Calibrate on VAL; report 2024-25; never touch 2025-26.
+Calibrate on VAL; report 2025-26 only (never used for selection).
+Train window: seasons <= 2024-25. Live serve: 2026-27.
 """
 
 from __future__ import annotations
@@ -87,8 +88,12 @@ def main():
     matchups_val = pd.read_pickle(os.path.join(DATA_DIR, "matchups_val.pkl"))
     matchups_test = pd.read_pickle(os.path.join(DATA_DIR, "matchups_test.pkl"))
 
-    if matchups_test["season_id"].astype(str).eq("22025").any():
-        raise RuntimeError("matchups_test contains frozen 2025-26")
+    if matchups_test["season_id"].astype(str).ne("22025").any():
+        raise RuntimeError("matchups_test must be report-only 2025-26 (season_id=22025)")
+    if (matchups_train["season_id"].astype(str) > "22024").any() or (
+        matchups_val["season_id"].astype(str) > "22024"
+    ).any():
+        raise RuntimeError("train/val must not include 2025-26+")
 
     candidates = {
         "counting": MATCHUP_CORE_FEATURES + [ABSENCE_FEATURE_PLAYER],
@@ -202,8 +207,8 @@ def main():
     elo_te = elo_win_prob(matchups_test["elo_diff"].values)
 
     report_rows = [
-        evaluate_probs(y_te, elo_te, "elo_only/test_2024-25"),
-        evaluate_probs(y_te, log_te, f"logistic_{best_name}_{best_calib}/test_2024-25"),
+        evaluate_probs(y_te, elo_te, "elo_only/test_2025-26"),
+        evaluate_probs(y_te, log_te, f"logistic_{best_name}_{best_calib}/test_2025-26"),
     ]
     for name, cols in candidates.items():
         if name == best_name:
@@ -214,7 +219,7 @@ def main():
             evaluate_probs(
                 y_te,
                 alt.predict_proba(pack(matchups_test, cols)[0])[:, 1],
-                f"logistic_{name}/test_2024-25_not_selected",
+                f"logistic_{name}/test_2025-26_not_selected",
             )
         )
     report_rows.extend(val_rows)
@@ -249,8 +254,13 @@ def main():
         "bootstrap_val_logloss_delta_efficiency_minus_counting": boot_eff_vs_count,
         "bootstrap_val_logloss_delta_counting_minus_minutes": boot_count_vs_min,
         "validation_metrics": val_rows,
-        "report_test_season": "2024-25",
-        "frozen_season": "2025-26",
+        "train_season_max": "2024-25",
+        "report_test_season": "2025-26",
+        "live_season": "2026-27",
+        "selection_note": (
+            "Absence feature + calibration chosen on VAL only; "
+            "2025-26 is report-only and was not used for selection."
+        ),
         "counting_formula": "PTS + 1.5*AST + REB + STL + BLK - TOV",
         "efficiency_formula": (
             "PTS + 0.4*FGM - 0.7*FGA - 0.4*(FTA-FTM) + 0.7*OREB + 0.3*DREB "
@@ -275,12 +285,13 @@ def main():
             f"test_accuracy={te['accuracy']:.6f}\n"
             f"boot_eff_minus_counting={boot_eff_vs_count['delta_mean']:.6f} "
             f"[{boot_eff_vs_count['ci95_low']:.6f}, {boot_eff_vs_count['ci95_high']:.6f}]\n"
-            f"frozen_eval_season=2025-26\n"
+            f"report_test_season=2025-26\n"
+            f"live_season=2026-27\n"
         )
 
-    print("\nReport test (2024-25):")
+    print("\nReport test (2025-26):")
     for r in report_rows:
-        if "test_2024-25" in r["model"]:
+        if "test_2025-26" in r["model"]:
             print(
                 f"  {r['model']}: acc={r['accuracy']:.3f}  "
                 f"logloss={r['log_loss']:.4f}  brier={r['brier']:.4f}  auc={r['auc']:.3f}"

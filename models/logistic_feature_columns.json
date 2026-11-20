@@ -1,7 +1,7 @@
 {
   "absence_feature": "efficiency",
   "value_key": "impact_eff",
-  "calibration": "sigmoid",
+  "calibration": "none",
   "columns": [
     "elo_diff",
     "rest_diff",
