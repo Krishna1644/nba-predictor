@@ -274,11 +274,30 @@ def compute_team_game_player_deficit(logs, team_games):
     return impact
 
 
+def _strip_name_suffix(norm: str) -> str:
+    n = norm.strip()
+    for suf in (" jr.", " jr", " sr.", " sr", " iii", " ii", " iv"):
+        if n.endswith(suf):
+            return n[: -len(suf)].strip()
+    return n
+
+
+def match_name_key(name: str) -> str:
+    return _strip_name_suffix(normalize_name(name))
+
+
 def serving_missing_ids_from_injuries(
     injuries: pd.DataFrame,
     roster: pd.DataFrame,
     prior_lookup: dict,
+    unmatched_out: list[str] | None = None,
 ) -> list[int]:
+    """
+    Map Status==Out injury names onto this team's roster PLAYER_IDs.
+
+    Only roster players count (tonight's team). Optionally append Out names that
+    did not match any roster player into `unmatched_out`.
+    """
     if injuries is None or injuries.empty or roster is None or roster.empty:
         return []
 
@@ -286,21 +305,31 @@ def serving_missing_ids_from_injuries(
     if "Status" not in injuries.columns:
         return []
 
-    out_names = set()
+    out_names: set[str] = set()
+    out_raw_by_key: dict[str, str] = {}
     for n, st in zip(injuries[name_col], injuries["Status"]):
         status = str(st).strip()
         if status != "Out":
             status = canonicalize_injury_status(status)
         if not is_exact_out_status(status):
             continue
-        out_names.add(normalize_name(n))
+        key = match_name_key(str(n))
+        if not key:
+            continue
+        out_names.add(key)
+        out_raw_by_key.setdefault(key, str(n))
 
     pid_col = "PLAYER_ID" if "PLAYER_ID" in roster.columns else "Player_ID"
     pname_col = "PLAYER" if "PLAYER" in roster.columns else "PLAYER_NAME"
 
+    roster_keys = {match_name_key(str(row[pname_col])) for _, row in roster.iterrows()}
+    if unmatched_out is not None:
+        for key in sorted(out_names - roster_keys):
+            unmatched_out.append(out_raw_by_key.get(key, key))
+
     missing = []
     for _, row in roster.iterrows():
-        if normalize_name(str(row[pname_col])) not in out_names:
+        if match_name_key(str(row[pname_col])) not in out_names:
             continue
         pid = int(row[pid_col])
         prior = prior_lookup.get(pid)
@@ -370,7 +399,17 @@ def annotate_consecutive_misses(
     season_id: str,
     team_abbr: str,
     prior_lookup: dict,
+    *,
+    miss_season_id: str | None = None,
 ) -> dict:
+    """
+    Count consecutive team games missed in `miss_season_id` (default: season_id).
+
+    When the miss-tracking season has no games yet (e.g. live 22026 empty while
+    priors come from 22025), leave consecutive_misses at 0 so long prior-season
+    DNPs do not zero out tonight's Out deficits.
+    """
+    track_season = str(miss_season_id or season_id)
     games = pd.read_sql(
         """
         SELECT DISTINCT Game_ID, GAME_DATE
@@ -379,13 +418,18 @@ def annotate_consecutive_misses(
         ORDER BY GAME_DATE
         """,
         conn,
-        params=(str(season_id), f"{team_abbr} %"),
+        params=(track_season, f"{team_abbr} %"),
     )
+    out = {pid: dict(p) for pid, p in prior_lookup.items()}
+    for pid in out:
+        out[pid]["consecutive_misses"] = int(out[pid].get("consecutive_misses", 0) or 0)
+
     if games.empty:
-        return prior_lookup
+        for pid in out:
+            out[pid]["consecutive_misses"] = 0
+        return out
 
     gids = list(games["Game_ID"].astype(str))
-    out = {pid: dict(p) for pid, p in prior_lookup.items()}
     for pid in list(out.keys()):
         appeared = pd.read_sql(
             """
@@ -394,13 +438,14 @@ def annotate_consecutive_misses(
             WHERE SEASON_ID = ? AND Player_ID = ? AND MATCHUP LIKE ?
             """,
             conn,
-            params=(str(season_id), int(pid), f"{team_abbr} %"),
+            params=(track_season, int(pid), f"{team_abbr} %"),
         )
         appeared_ids = set(appeared["Game_ID"].astype(str))
         last_idx = -1
         for i, gid in enumerate(gids):
             if gid in appeared_ids:
                 last_idx = i
+        # Never appeared this season → treat as 0 for serving (new roster / no logs)
         out[pid]["consecutive_misses"] = (
             0 if last_idx < 0 else int(len(gids) - last_idx - 1)
         )

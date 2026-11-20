@@ -26,6 +26,7 @@ sys.path.insert(0, ROOT)
 from nba_ml.live_sources import (
     EspnSource,
     NbaApiSource,
+    assert_schedule_context_varies,
     compute_schedule_context,
     fetch_with_fallback,
     get_source,
@@ -92,6 +93,10 @@ def main() -> int:
                 pass
 
     context = compute_schedule_context(games, rosters, game_date=day)
+    try:
+        assert_schedule_context_varies(context)
+    except AssertionError as exc:
+        print(f"  [WARN] {exc}")
     write_live_bundle(games, injuries, rosters, context)
     write_injury_snapshot(injuries, day=day)
 

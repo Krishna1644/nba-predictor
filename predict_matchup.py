@@ -15,10 +15,12 @@ import sqlite3
 import joblib
 import pandas as pd
 
+from nba_ml.absence import canonicalize_injury_status, is_exact_out_status
 from nba_ml.features import LOOKBACK, REST_DAYS_CAP, compute_team_absence_deficit
 from nba_ml.player_priors import (
     annotate_consecutive_misses,
     build_prior_lookup_from_db,
+    match_name_key,
     serving_missing_ids_from_injuries,
 )
 
@@ -41,7 +43,10 @@ def team_abbr_from_id(team_id) -> str | None:
 
 
 def load_schedule_ctx():
-    for path in ("schedule_context.csv", os.path.join("data", "live", "schedule_context.csv")):
+    for path in (
+        "schedule_context.csv",
+        os.path.join("data", "live", "schedule_context.csv"),
+    ):
         try:
             if not os.path.exists(path):
                 continue
@@ -95,6 +100,24 @@ def resolve_season_id(conn) -> str:
     return str(rows.iloc[0]["SEASON_ID"])
 
 
+def injuries_for_tonight(
+    injuries: pd.DataFrame,
+    team_ids: list[int],
+    rosters: pd.DataFrame,
+) -> pd.DataFrame:
+    """Keep Out/injury rows for teams playing tonight only."""
+    if injuries is None or injuries.empty:
+        return pd.DataFrame()
+    tonight = set(int(t) for t in team_ids)
+    if "TeamID" in injuries.columns and injuries["TeamID"].notna().any():
+        return injuries[injuries["TeamID"].apply(lambda x: pd.notna(x) and int(x) in tonight)].copy()
+    # No team column (CBS): restrict to names on tonight's rosters
+    if rosters is None or rosters.empty or "PLAYER" not in rosters.columns:
+        return injuries.copy()
+    keys = {match_name_key(str(p)) for p in rosters["PLAYER"].tolist()}
+    return injuries[injuries["Player"].map(lambda n: match_name_key(str(n)) in keys)].copy()
+
+
 def team_absence_deficit_for_serve(
     conn,
     season_id: str,
@@ -104,24 +127,72 @@ def team_absence_deficit_for_serve(
     injuries,
     min_minutes: float,
     value_key: str = "impact",
+    unmatched_out: list[str] | None = None,
 ) -> float:
     """Build missing list + priors, then call the shared deficit function."""
     roster = rosters[rosters["TeamID"] == team_id]
     if roster.empty:
         return 0.0
+    # Prefer team-scoped injuries when TeamID is present
+    team_inj = injuries
+    if injuries is not None and not injuries.empty and "TeamID" in injuries.columns:
+        team_inj = injuries[
+            injuries["TeamID"].apply(lambda x: pd.notna(x) and int(x) == int(team_id))
+        ]
     pids = [int(x) for x in roster["PLAYER_ID"].tolist()]
     prior_lookup = build_prior_lookup_from_db(conn, season_id, pids)
+    # Track consecutive misses on the LIVE season only — never inflate from prior year
     prior_lookup = annotate_consecutive_misses(
-        conn, season_id, team_abbr, prior_lookup
+        conn,
+        season_id,
+        team_abbr,
+        prior_lookup,
+        miss_season_id=LIVE_SEASON_ID,
     )
     adjusted = {
         pid: {**p, "minutes": p["minutes"] if p["minutes"] >= min_minutes else 0.0}
         for pid, p in prior_lookup.items()
     }
-    missing_ids = serving_missing_ids_from_injuries(injuries, roster, adjusted)
+    missing_ids = serving_missing_ids_from_injuries(
+        team_inj, roster, adjusted, unmatched_out=unmatched_out
+    )
     return compute_team_absence_deficit(
         missing_ids, prior_lookup, value_key=value_key
     )
+
+
+def biggest_feature_reason(row: dict, coefs: dict, home_name: str, away_name: str) -> str:
+    if not coefs:
+        return "Model blend of Elo, rest, form, and absences."
+    scored = []
+    for feat, coef in coefs.items():
+        if feat not in row:
+            continue
+        contrib = float(coef) * float(row[feat])
+        scored.append((abs(contrib), feat, contrib, row[feat]))
+    if not scored:
+        return "Model blend of Elo, rest, form, and absences."
+    scored.sort(reverse=True)
+    _, feat, contrib, raw = scored[0]
+    favors_home = contrib > 0
+    side = home_name if favors_home else away_name
+    labels = {
+        "elo_diff": f"Elo edge for {side}",
+        "rest_diff": f"Rest edge for {side}",
+        "b2b_diff": f"Back-to-back load favors {side}",
+        "g7_diff": f"Schedule density favors {side}",
+        "player_deficit_eff_diff": (
+            f"Absence hole larger for {away_name if favors_home else home_name}"
+            if abs(float(raw)) > 0.05
+            else f"Absence differential favors {side}"
+        ),
+        "player_deficit_diff": f"Absence differential favors {side}",
+        "form_pts_diff": f"Recent scoring form favors {side}",
+        "form_reb_diff": f"Recent rebound form favors {side}",
+        "form_ast_diff": f"Recent assist form favors {side}",
+        "form_pm_diff": f"Recent plus/minus favors {side}",
+    }
+    return labels.get(feat, f"{feat} favors {side}")
 
 
 def main():
@@ -129,6 +200,7 @@ def main():
     model_path = os.path.join(MODELS_DIR, "logistic_baseline.pkl")
     elo_path = os.path.join(MODELS_DIR, "elo_ratings.json")
     cols_path = os.path.join(MODELS_DIR, "logistic_feature_columns.json")
+    coef_path = os.path.join(MODELS_DIR, "logistic_coefficients.json")
 
     if not os.path.exists(model_path):
         print(f"[FAIL] Missing {model_path}. Run train_baseline.py first.")
@@ -141,15 +213,22 @@ def main():
     with open(elo_path, encoding="utf-8") as f:
         elo = json.load(f)
     value_key = "impact"
+    calib = "none"
     if os.path.exists(cols_path):
         with open(cols_path, encoding="utf-8") as f:
             meta = json.load(f)
             feature_cols = meta["columns"]
             value_key = meta.get("value_key", "impact")
+            calib = meta.get("calibration", "none")
     else:
         from nba_ml.features import ABSENCE_FEATURE_PLAYER, MATCHUP_CORE_FEATURES
 
         feature_cols = MATCHUP_CORE_FEATURES + [ABSENCE_FEATURE_PLAYER]
+    coefs = {}
+    if os.path.exists(coef_path):
+        with open(coef_path, encoding="utf-8") as f:
+            coefs = json.load(f)
+    print(f"  Calibration (VAL-selected): {calib}")
 
     def _read_csv(*names: str) -> pd.DataFrame:
         for n in names:
@@ -166,18 +245,32 @@ def main():
         print("  [WARNING] todays_rosters.csv missing.")
         rosters = pd.DataFrame()
     try:
-        injuries = _read_csv(
+        injuries_raw = _read_csv(
             "injuries.csv", os.path.join("data", "live", "injuries.csv")
         )
     except Exception:
         print("  [WARNING] injuries.csv missing — deficits will be 0.")
-        injuries = pd.DataFrame()
+        injuries_raw = pd.DataFrame()
+
+    team_ids = (
+        pd.concat([games["HOME_TEAM_ID"], games["VISITOR_TEAM_ID"]])
+        .astype(int)
+        .unique()
+        .tolist()
+    )
+    injuries = injuries_for_tonight(injuries_raw, team_ids, rosters)
+    print(
+        f"  Injuries tonight-only: {len(injuries)} / {len(injuries_raw)} rows "
+        f"({(injuries['Status'].map(lambda s: is_exact_out_status(canonicalize_injury_status(s))).sum()) if not injuries.empty else 0} Out)"
+    )
+
     schedule_ctx = load_schedule_ctx()
     conn = sqlite3.connect(DB_NAME)
     season_id = resolve_season_id(conn)
-    print(f"  Using season_id={season_id} for player priors")
+    print(f"  Using season_id={season_id} for player priors; miss-track={LIVE_SEASON_ID}")
 
     preds = []
+    all_unmatched: list[str] = []
     for _, g in games.iterrows():
         home_id, away_id = int(g["HOME_TEAM_ID"]), int(g["VISITOR_TEAM_ID"])
         home_abbr = team_abbr_from_id(home_id)
@@ -199,14 +292,40 @@ def main():
         )
         hf = rolling_form_from_db(conn, home_abbr)
         af = rolling_form_from_db(conn, away_abbr)
+        unmatched_h: list[str] = []
+        unmatched_a: list[str] = []
         hm = team_absence_deficit_for_serve(
-            conn, season_id, home_id, home_abbr, rosters, injuries, 10.0, value_key
+            conn,
+            season_id,
+            home_id,
+            home_abbr,
+            rosters,
+            injuries,
+            10.0,
+            value_key,
+            unmatched_out=unmatched_h,
         )
         am = team_absence_deficit_for_serve(
-            conn, season_id, away_id, away_abbr, rosters, injuries, 10.0, value_key
+            conn,
+            season_id,
+            away_id,
+            away_abbr,
+            rosters,
+            injuries,
+            10.0,
+            value_key,
+            unmatched_out=unmatched_a,
         )
-        deficit_diff = hm - am
+        # Only log unmatched when team-scoped injuries exist (TeamID present)
+        if "TeamID" in injuries.columns:
+            for name in unmatched_h:
+                print(f"  [unmatched Out] {home_abbr}: {name}")
+                all_unmatched.append(f"{home_abbr}:{name}")
+            for name in unmatched_a:
+                print(f"  [unmatched Out] {away_abbr}: {name}")
+                all_unmatched.append(f"{away_abbr}:{name}")
 
+        deficit_diff = hm - am
         row = {
             "elo_diff": home_elo - away_elo,
             "rest_diff": hs["rest_days"] - as_["rest_days"],
@@ -223,12 +342,17 @@ def main():
         }
 
         X = pd.DataFrame([{c: row[c] for c in feature_cols}])
+        # Pipeline may be raw logistic or CalibratedClassifierCV (Platt/isotonic)
         home_prob = float(model.predict_proba(X)[0, 1])
         away_prob = 1.0 - home_prob
         winner = home_name if home_prob >= away_prob else away_name
         conf = max(home_prob, away_prob)
+        reason = biggest_feature_reason(row, coefs, home_name, away_name)
 
-        print(f"  {away_name} @ {home_name}: home {home_prob:.1%} -> {winner}")
+        print(
+            f"  {away_name} @ {home_name}: home {home_prob:.1%} -> {winner} "
+            f"(def {hm:.1f}/{am:.1f}; rest {hs['rest_days']}/{as_['rest_days']})"
+        )
         preds.append(
             {
                 "GAME_ID": g["GAME_ID"],
@@ -238,13 +362,23 @@ def main():
                 "Away_Win_Prob": away_prob,
                 "Predicted_Winner": winner,
                 "Confidence": conf,
-                "Model": "logistic_matchup",
+                "Win_Probability": conf,
+                "Model": f"logistic_matchup_{calib}",
                 "Home_Player_Deficit": hm,
                 "Away_Player_Deficit": am,
+                "Reason": reason,
+                "Home_Rest": hs["rest_days"],
+                "Away_Rest": as_["rest_days"],
+                "Home_B2B": hs["is_back_to_back"],
+                "Away_B2B": as_["is_back_to_back"],
+                "Home_G7": hs["games_last_7"],
+                "Away_G7": as_["games_last_7"],
             }
         )
 
     conn.close()
+    if all_unmatched:
+        print(f"  Unmatched Out names ({len(all_unmatched)}): {all_unmatched[:20]}")
     if not preds:
         print("[FAIL] No predictions generated.")
         return

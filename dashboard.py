@@ -8,18 +8,21 @@ from __future__ import annotations
 import datetime
 import json
 import os
-import sqlite3
 import unicodedata
 from zoneinfo import ZoneInfo
 
+import numpy as np
 import pandas as pd
 import streamlit as st
-from nba_api.stats.static import teams
 
-try:
-    from google import genai
-except ImportError:
-    genai = None
+from nba_ml.history_validation import (
+    fetch_espn_standings,
+    grade_preds,
+    list_pred_dates,
+    load_preds,
+    summarize_season,
+)
+from nba_ml.team_ids import NBA_ID_TO_ABBR
 
 st.set_page_config(page_title="NBA Win Probability", layout="wide")
 
@@ -28,6 +31,16 @@ SEASON_LABEL = {
     "22024": "2024-25",
     "22025": "2025-26",
     "22026": "2026-27",
+}
+# ESPN/CDN logos by NBA abbreviation (GSW, NYK, …)
+LOGO_URL = "https://a.espncdn.com/i/teamlogos/nba/500/{abbr}.png"
+ABBR_FOR_LOGO = {
+    "NOP": "no",
+    "NYK": "ny",
+    "GSW": "gs",
+    "SAS": "sa",
+    "UTA": "utah",
+    "WAS": "wsh",
 }
 
 
@@ -53,6 +66,18 @@ def _norm_name(name) -> str:
     ).lower().strip()
 
 
+def logo_url_for_team_name(name: str) -> str | None:
+    # Reverse lookup from full name
+    for tid, full in __import__("nba_ml.team_ids", fromlist=["NBA_ID_TO_NAME"]).NBA_ID_TO_NAME.items():
+        if full == name:
+            abbr = NBA_ID_TO_ABBR.get(tid)
+            if not abbr:
+                return None
+            slug = ABBR_FOR_LOGO.get(abbr, abbr.lower())
+            return LOGO_URL.format(abbr=slug)
+    return None
+
+
 @st.cache_data(ttl=600)
 def load_model_meta():
     path = _first_existing(
@@ -63,6 +88,11 @@ def load_model_meta():
     if path:
         with open(path, encoding="utf-8") as f:
             meta = json.load(f)
+    # Prefer feature_selection calibration_selected when present
+    if "calibration_selected" in meta and "calibration" not in meta:
+        meta["calibration"] = meta["calibration_selected"]
+    if "selected_absence_feature" in meta and "absence_feature" not in meta:
+        meta["absence_feature"] = meta["selected_absence_feature"]
     metrics_path = "artifacts/baseline_metrics.json"
     report = None
     if os.path.exists(metrics_path):
@@ -77,7 +107,12 @@ def load_model_meta():
                 "model", ""
             ):
                 report = r
-    return meta, report
+    coefs = {}
+    coef_path = "models/logistic_coefficients.json"
+    if os.path.exists(coef_path):
+        with open(coef_path, encoding="utf-8") as f:
+            coefs = json.load(f)
+    return meta, report, coefs
 
 
 @st.cache_data(ttl=600)
@@ -95,6 +130,8 @@ def load_data():
         preds["GAME_ID"] = _norm_game_id(preds["GAME_ID"])
     if "GAME_ID" in games.columns:
         games["GAME_ID"] = _norm_game_id(games["GAME_ID"])
+    if "Win_Probability" not in preds.columns and "Confidence" in preds.columns:
+        preds["Win_Probability"] = preds["Confidence"]
 
     def _csv(*names):
         p = _first_existing(*names)
@@ -121,96 +158,26 @@ def load_data():
         "injuries": injuries,
         "schedule_ctx": schedule_ctx,
         "elo": elo,
-        "preds_path": preds_path,
-        "games_path": games_path,
         "preds_mtime": datetime.datetime.fromtimestamp(os.path.getmtime(preds_path)),
     }
 
 
-@st.cache_data(ttl=3600)
-def load_season_stats():
-    db = _first_existing("nba_stats.db")
-    if not db:
-        # Unpack slim gz if present (local / Cloud without full DB)
-        gz = _first_existing("data/nba_stats_live.db.gz")
-        if gz:
-            import gzip
-            import shutil
+@st.cache_data(ttl=1800)
+def load_standings_and_elo(elo_dict: dict):
+    standings = fetch_espn_standings()
+    if standings.empty:
+        return standings
+    # Map ESPN abbr → our Elo keys
+    from nba_ml.team_ids import nba_abbr_from_espn
 
-            with gzip.open(gz, "rb") as f_in, open("nba_stats.db", "wb") as f_out:
-                shutil.copyfileobj(f_in, f_out)
-            db = "nba_stats.db"
-        else:
-            return pd.DataFrame(), None
+    def elo_for(row):
+        abbr = nba_abbr_from_espn(row.get("Abbr")) or row.get("Abbr")
+        return float(elo_dict.get(abbr, 1500.0))
 
-    conn = sqlite3.connect(db)
-    season_ids = (
-        pd.read_sql(
-            "SELECT DISTINCT SEASON_ID FROM player_logs ORDER BY SEASON_ID DESC", conn
-        )["SEASON_ID"]
-        .astype(str)
-        .tolist()
-    )
-    season_id = next(
-        (s for s in ("22026", "22025", "22024") if s in season_ids),
-        season_ids[0] if season_ids else None,
-    )
-    if not season_id:
-        conn.close()
-        return pd.DataFrame(), None
-
-    query = """
-    WITH team_games AS (
-        SELECT
-            TEAM_ABBR, Game_ID,
-            MAX(CASE WHEN WL = 'W' THEN 1 ELSE 0 END) AS Win,
-            SUM(PTS) AS PTS, SUM(REB) AS REB, SUM(AST) AS AST,
-            SUM(FGM) AS FGM, SUM(FGA) AS FGA,
-            SUM(FG3M) AS FG3M, SUM(FG3A) AS FG3A,
-            SUM(FTM) AS FTM, SUM(FTA) AS FTA,
-            SUM(TOV) AS TOV, SUM(PLUS_MINUS)/5.0 AS PLUS_MINUS
-        FROM player_logs
-        WHERE SEASON_ID = ?
-        GROUP BY TEAM_ABBR, Game_ID
-    )
-    SELECT
-        TEAM_ABBR, COUNT(Game_ID) AS Games, SUM(Win) AS Wins,
-        SUM(PTS) AS Total_PTS, SUM(REB) AS Total_REB, SUM(AST) AS Total_AST,
-        SUM(FGM) AS Total_FGM, SUM(FGA) AS Total_FGA,
-        SUM(FG3M) AS Total_FG3M, SUM(FG3A) AS Total_FG3A,
-        SUM(FTM) AS Total_FTM, SUM(FTA) AS Total_FTA,
-        SUM(TOV) AS Total_TOV, SUM(PLUS_MINUS) AS Total_Diff
-    FROM team_games
-    GROUP BY TEAM_ABBR
-    """
-    try:
-        df = pd.read_sql(query, conn, params=(season_id,))
-    except Exception:
-        df = pd.DataFrame()
-    finally:
-        conn.close()
-
-    if df.empty:
-        return df, season_id
-
-    df["Win%"] = df["Wins"] / df["Games"]
-    df["PPG"] = df["Total_PTS"] / df["Games"]
-    df["RPG"] = df["Total_REB"] / df["Games"]
-    df["APG"] = df["Total_AST"] / df["Games"]
-    df["DIFF"] = df["Total_Diff"] / df["Games"]
-    df["eFG%"] = (df["Total_FGM"] + 0.5 * df["Total_FG3M"]) / df["Total_FGA"]
-    df["TS%"] = df["Total_PTS"] / (2 * (df["Total_FGA"] + 0.44 * df["Total_FTA"]))
-    df["TOV%"] = df["Total_TOV"] / (
-        df["Total_FGA"] + 0.44 * df["Total_FTA"] + df["Total_TOV"]
-    )
-    return df, season_id
-
-
-def get_team_name(team_id):
-    try:
-        return teams.find_team_name_by_id(int(team_id))["full_name"]
-    except Exception:
-        return f"Team {team_id}"
+    standings = standings.copy()
+    standings["Elo"] = standings.apply(elo_for, axis=1)
+    standings["Team"] = standings["Team"].fillna("")
+    return standings.sort_values(["Conference", "Win%"], ascending=[True, False])
 
 
 def schedule_date_str(games: pd.DataFrame) -> str | None:
@@ -220,14 +187,18 @@ def schedule_date_str(games: pd.DataFrame) -> str | None:
     return raw.split("T")[0]
 
 
-# --- load ---
-meta, report = load_model_meta()
-bundle = load_data()
-season_stats_df, season_id = load_season_stats()
-season_name = SEASON_LABEL.get(str(season_id), str(season_id) if season_id else "—")
+def win_prob_col(pred) -> float:
+    if "Win_Probability" in pred.index and pd.notna(pred.get("Win_Probability")):
+        return float(pred["Win_Probability"])
+    return float(pred["Confidence"])
 
-absence = meta.get("absence_feature", "efficiency")
-calib = meta.get("calibration", "none")
+
+# --- load ---
+meta, report, coefs = load_model_meta()
+bundle = load_data()
+
+absence = meta.get("absence_feature", meta.get("selected_absence_feature", "efficiency"))
+calib = meta.get("calibration", meta.get("calibration_selected", "none"))
 value_key = meta.get("value_key", "impact_eff")
 
 st.title("NBA Win Probability")
@@ -237,29 +208,20 @@ st.caption(
 )
 
 with st.sidebar:
-    st.header("Data")
-    st.markdown(
-        "Predictions are **precomputed** (`data/live/`). "
-        "This app never retrains. See `data/live/MANUAL.md` to drop in CSVs by hand."
-    )
+    st.header("Tonight")
     if bundle:
-        st.write(f"Preds file: `{bundle['preds_path']}`")
-        st.write(f"Updated: {bundle['preds_mtime'].strftime('%Y-%m-%d %H:%M')}")
+        st.write(f"Updated {bundle['preds_mtime'].strftime('%Y-%m-%d %H:%M')}")
+        st.caption("Predictions are precomputed. This app never retrains.")
     st.divider()
     st.markdown(
         f"**Model**\n\n"
-        f"- Absence: `{absence}` (`{value_key}`)\n"
+        f"- Absence: `{absence}`\n"
         f"- Calibration: `{calib}`\n"
-        f"- Leaderboard season: **{season_name}**"
+        f"- Live season: **2026-27**"
     )
-    if "GEMINI_API_KEY" in st.secrets:
-        os.environ["GEMINI_API_KEY"] = st.secrets["GEMINI_API_KEY"]
 
 if bundle is None:
-    st.error(
-        "Missing `data/live/final_predictions.csv` or `todays_games.csv`. "
-        "Drop files in `data/live/` (see MANUAL.md) or run `python run_pipeline.py`."
-    )
+    st.error("Missing live predictions. Run the daily pipeline or drop CSVs in data/live/.")
     st.stop()
 
 preds_df = bundle["preds"]
@@ -272,201 +234,172 @@ elo_dict = bundle["elo"]
 slate = schedule_date_str(games)
 today_et = datetime.datetime.now(ZoneInfo("America/New_York")).date().isoformat()
 if slate and slate != today_et:
-    st.warning(
-        f"Showing slate for **{slate}**, not today ({today_et} ET). "
-        "Live CSVs look stale or incomplete. Re-run `python run_pipeline.py` "
-        "(or `--source espn` on cloud) — details in `data/live/MANUAL.md`."
-    )
+    st.warning(f"Showing slate for **{slate}**, not today ({today_et} ET).")
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
-    [
-        "Matchups",
-        "Season",
-        "Assistant",
-        "Model",
-        "Projections",
-        "Validation",
-    ]
+tab_picks, tab_season, tab_model, tab_val = st.tabs(
+    ["Tonight's picks", "Season", "Model", "Validation"]
 )
 
-# --- Matchups ---
-with tab1:
-    st.subheader(f"Slate · {slate or 'unknown date'}")
-    if games.empty:
-        st.warning("No games in `todays_games.csv`.")
+# --- Tonight's picks (Matchups + Projections) ---
+with tab_picks:
+    st.subheader(f"Tonight's picks · {slate or 'unknown date'}")
 
-    game_options = ["All games"]
-    game_map = {}
-    for _, row in games.iterrows():
-        label = f"{get_team_name(row['VISITOR_TEAM_ID'])} @ {get_team_name(row['HOME_TEAM_ID'])}"
-        game_options.append(label)
-        game_map[label] = row["GAME_ID"]
-
-    selected = st.selectbox("Matchup", game_options)
-    display = (
-        preds_df
-        if selected == "All games"
-        else preds_df[preds_df["GAME_ID"] == game_map[selected]]
-    )
-    if display.empty:
-        st.warning("No predictions for this selection.")
-
-    for _, pred in display.iterrows():
+    # Compact card grid
+    for _, pred in preds_df.iterrows():
         home, away = pred["Home_Team"], pred["Away_Team"]
-        st.divider()
-        st.markdown(f"### {away} @ {home}")
-        st.info(
-            f"**{pred['Predicted_Winner']}** · "
-            f"{float(pred['Confidence']):.0%} confidence · "
-            f"P(home)={float(pred['Home_Win_Prob']):.1%}"
-        )
-        if "Model" in pred.index and pd.notna(pred.get("Model")):
-            st.caption(f"Model tag: {pred['Model']}")
+        home_p = float(pred["Home_Win_Prob"])
+        away_p = float(pred["Away_Win_Prob"])
+        win_p = win_prob_col(pred)
+        reason = pred.get("Reason") if "Reason" in pred.index else None
+        if not isinstance(reason, str) or not reason:
+            reason = "See Model tab for feature methodology."
 
-        c_away, c_home = st.columns(2)
-        away_fav = float(pred["Away_Win_Prob"]) > float(pred["Home_Win_Prob"])
+        with st.container(border=True):
+            c_logo_a, c_mid, c_logo_h = st.columns([1, 3, 1])
+            la = logo_url_for_team_name(away)
+            lh = logo_url_for_team_name(home)
+            with c_logo_a:
+                if la:
+                    st.image(la, width=56)
+                st.caption(away)
+            with c_logo_h:
+                if lh:
+                    st.image(lh, width=56)
+                st.caption(home)
+            with c_mid:
+                st.markdown(f"**{pred['Predicted_Winner']}** · {win_p:.0%} win probability")
+                st.progress(min(max(home_p, 0.0), 1.0), text=f"Home {home_p:.0%}  ·  Away {away_p:.0%}")
+                st.caption(reason)
 
-        def team_panel(col, name, prob, favored, is_home):
-            with col:
-                st.markdown(f"**{'Home' if is_home else 'Away'} · {name}**")
-                st.metric("Win prob", f"{float(prob):.1%}")
-                st.progress(min(max(float(prob), 0.0), 1.0))
+            # Detail metrics
+            d1, d2, d3, d4 = st.columns(4)
+            d1.metric("Home win prob", f"{home_p:.1%}")
+            d2.metric("Away win prob", f"{away_p:.1%}")
+            hd = float(pred["Home_Player_Deficit"]) if "Home_Player_Deficit" in pred.index else None
+            ad = float(pred["Away_Player_Deficit"]) if "Away_Player_Deficit" in pred.index else None
+            if hd is not None:
+                d3.metric(
+                    "Home deficit",
+                    f"{hd:.1f}",
+                    help="Efficiency-weighted value of Status=Out rotation players (higher = more missing production).",
+                )
+            if ad is not None:
+                d4.metric(
+                    "Away deficit",
+                    f"{ad:.1f}",
+                    help="Efficiency-weighted value of Status=Out rotation players (higher = more missing production).",
+                )
+
+            # Rest line from preds or schedule_ctx
+            if "Home_Rest" in pred.index:
+                st.caption(
+                    f"Rest {int(pred['Away_Rest'])}d / {int(pred['Home_Rest'])}d · "
+                    f"B2B {'yes' if int(pred.get('Away_B2B', 0)) else 'no'} / "
+                    f"{'yes' if int(pred.get('Home_B2B', 0)) else 'no'} · "
+                    f"last-7 {int(pred.get('Away_G7', 0))} / {int(pred.get('Home_G7', 0))}"
+                )
+            elif not schedule_ctx.empty:
                 try:
                     gid = pred["GAME_ID"]
                     g = games[games["GAME_ID"] == gid].iloc[0]
-                    tid = int(g["HOME_TEAM_ID" if is_home else "VISITOR_TEAM_ID"])
-                except Exception:
-                    return
-
-                if not schedule_ctx.empty:
-                    ctx = schedule_ctx[schedule_ctx["TEAM_ID"] == tid]
-                    if not ctx.empty:
-                        rest = int(min(int(ctx.iloc[0]["rest_days"]), REST_CAP))
-                        b2b = "yes" if int(ctx.iloc[0]["is_back_to_back"]) else "no"
-                        g7 = int(ctx.iloc[0]["games_last_7"])
-                        st.caption(f"Rest {rest}d (cap {REST_CAP}) · B2B {b2b} · last-7 {g7}")
-
-                deficit_col = (
-                    "Home_Player_Deficit" if is_home else "Away_Player_Deficit"
-                )
-                if deficit_col in pred.index and pd.notna(pred.get(deficit_col)):
-                    st.caption(f"Efficiency player deficit: {float(pred[deficit_col]):.1f}")
-
-                if not rosters.empty:
-                    tr = rosters[rosters["TeamID"] == tid]
-                    if not tr.empty:
-                        with st.expander(f"Roster ({len(tr)})"):
-                            cols = [c for c in ("PLAYER", "POSITION") if c in tr.columns]
-                            st.dataframe(tr[cols], hide_index=True, use_container_width=True)
-
-                if not injuries.empty and not rosters.empty:
-                    names = {_norm_name(x) for x in tr["PLAYER"].tolist()} if not tr.empty else set()
-                    rows = [
-                        inj
-                        for _, inj in injuries.iterrows()
-                        if _norm_name(inj.get("Player", "")) in names
-                    ]
-                    if rows:
-                        st.caption("Injuries (display) — model uses Status=`Out` only")
-                        st.dataframe(
-                            pd.DataFrame(rows)[["Player", "Injury", "Status"]],
-                            hide_index=True,
+                    hid, aid = int(g["HOME_TEAM_ID"]), int(g["VISITOR_TEAM_ID"])
+                    hc = schedule_ctx[schedule_ctx["TEAM_ID"] == hid]
+                    ac = schedule_ctx[schedule_ctx["TEAM_ID"] == aid]
+                    if not hc.empty and not ac.empty:
+                        st.caption(
+                            f"Rest {int(ac.iloc[0]['rest_days'])}d / {int(hc.iloc[0]['rest_days'])}d "
+                            f"(cap {REST_CAP}) · "
+                            f"B2B {'yes' if int(ac.iloc[0]['is_back_to_back']) else 'no'} / "
+                            f"{'yes' if int(hc.iloc[0]['is_back_to_back']) else 'no'} · "
+                            f"last-7 {int(ac.iloc[0]['games_last_7'])} / {int(hc.iloc[0]['games_last_7'])}"
                         )
+                except Exception:
+                    pass
 
-        team_panel(c_away, away, pred["Away_Win_Prob"], away_fav, False)
-        team_panel(c_home, home, pred["Home_Win_Prob"], not away_fav, True)
+            with st.expander("Injuries & roster"):
+                try:
+                    gid = pred["GAME_ID"]
+                    g = games[games["GAME_ID"] == gid].iloc[0]
+                    for tid, label in (
+                        (int(g["VISITOR_TEAM_ID"]), away),
+                        (int(g["HOME_TEAM_ID"]), home),
+                    ):
+                        st.markdown(f"**{label}**")
+                        if not injuries.empty:
+                            if "TeamID" in injuries.columns:
+                                ti = injuries[injuries["TeamID"] == tid]
+                            elif not rosters.empty:
+                                names = {
+                                    _norm_name(x)
+                                    for x in rosters.loc[
+                                        rosters["TeamID"] == tid, "PLAYER"
+                                    ].tolist()
+                                }
+                                ti = injuries[
+                                    injuries["Player"].map(_norm_name).isin(names)
+                                ]
+                            else:
+                                ti = pd.DataFrame()
+                            if not ti.empty:
+                                cols = [c for c in ("Player", "Injury", "Status") if c in ti.columns]
+                                st.dataframe(ti[cols], hide_index=True, use_container_width=True)
+                            else:
+                                st.caption("No listed injuries for this team.")
+                except Exception as e:
+                    st.caption(str(e))
+
+    st.divider()
+    st.markdown("#### All projections")
+    show = preds_df.copy()
+    rename = {"Confidence": "Win_Probability"}
+    show = show.rename(columns={k: v for k, v in rename.items() if k in show.columns})
+    for c in ("Home_Win_Prob", "Away_Win_Prob", "Win_Probability"):
+        if c in show.columns:
+            show[c] = show[c].map(lambda x: f"{float(x):.1%}")
+    keep = [
+        c
+        for c in (
+            "Away_Team",
+            "Home_Team",
+            "Away_Win_Prob",
+            "Home_Win_Prob",
+            "Predicted_Winner",
+            "Win_Probability",
+            "Home_Player_Deficit",
+            "Away_Player_Deficit",
+            "Reason",
+        )
+        if c in show.columns
+    ]
+    st.dataframe(show[keep], hide_index=True, use_container_width=True)
+    st.download_button(
+        "Download CSV",
+        data=preds_df.to_csv(index=False).encode("utf-8"),
+        file_name=f"projections_{slate or 'slate'}.csv",
+        mime="text/csv",
+    )
 
 # --- Season ---
-with tab2:
-    st.subheader(f"Team table · {season_name}")
-    st.caption("From box scores in DB / slim live DB. Elo from `models/elo_ratings.json`.")
-    if season_stats_df.empty:
-        st.warning(
-            "No season aggregates. Unpack `data/nba_stats_live.db.gz` or add `nba_stats.db` "
-            "(include 2026-27 when available)."
-        )
+with tab_season:
+    st.subheader("2026-27 standings")
+    standings = load_standings_and_elo(elo_dict)
+    if standings.empty:
+        st.warning("Could not load ESPN standings.")
     else:
-        df = season_stats_df.copy()
-        if elo_dict:
-            df["Elo"] = df["TEAM_ABBR"].map(elo_dict).fillna(1500.0)
-        cols = ["TEAM_ABBR", "Games", "Wins", "Win%", "PPG", "RPG", "APG", "DIFF", "eFG%", "TS%", "TOV%"]
-        if "Elo" in df.columns:
-            cols.insert(1, "Elo")
-        show = df[cols].sort_values("Win%", ascending=False)
-        st.dataframe(
-            show.style.format(
-                {
-                    "Elo": "{:.0f}",
-                    "Win%": "{:.1%}",
-                    "PPG": "{:.1f}",
-                    "RPG": "{:.1f}",
-                    "APG": "{:.1f}",
-                    "DIFF": "{:+.1f}",
-                    "eFG%": "{:.1%}",
-                    "TS%": "{:.1%}",
-                    "TOV%": "{:.1%}",
-                }
-            ),
-            hide_index=True,
-            use_container_width=True,
-            height=720,
-        )
-
-# --- Assistant ---
-with tab3:
-    st.subheader("Ask about tonight's slate")
-    if not genai or not os.getenv("GEMINI_API_KEY"):
-        st.info("Optional: set `GEMINI_API_KEY` in Streamlit secrets for the assistant.")
-    else:
-        if "messages" not in st.session_state:
-            st.session_state.messages = []
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-        if prompt := st.chat_input("e.g. Who is favored tonight and why?"):
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            ctx = (
-                f"Model: logistic absence={absence} calib={calib}\n"
-                f"Predictions:\n{preds_df.to_string(index=False)}\n"
+        for conf in ("East", "West", "Eastern Conference", "Western Conference"):
+            block = standings[standings["Conference"].astype(str).str.contains(conf[:4], case=False, na=False)]
+            if block.empty:
+                continue
+            st.markdown(f"**{conf}**")
+            view = block[["Team", "W", "L", "Win%", "Elo"]].copy()
+            st.dataframe(
+                view.style.format({"Win%": "{:.1%}", "Elo": "{:.0f}"}),
+                hide_index=True,
+                use_container_width=True,
             )
-            with st.chat_message("assistant"):
-                ph = st.empty()
-                try:
-                    client = genai.Client()
-                    resp = None
-                    err = None
-                    for model_name in (
-                        "gemini-2.5-flash",
-                        "gemini-2.5-flash-lite",
-                        "gemini-2.0-flash",
-                    ):
-                        try:
-                            resp = client.models.generate_content(
-                                model=model_name,
-                                contents=prompt,
-                                config=genai.types.GenerateContentConfig(
-                                    system_instruction=(
-                                        "NBA analyst. Use only provided context. Markdown.\n"
-                                        + ctx
-                                    ),
-                                    temperature=0.3,
-                                ),
-                            )
-                            break
-                        except Exception as e:
-                            err = str(e)
-                    if resp:
-                        ph.markdown(resp.text)
-                        st.session_state.messages.append(
-                            {"role": "assistant", "content": resp.text}
-                        )
-                    else:
-                        ph.error(err or "Gemini failed")
-                except Exception as e:
-                    ph.error(str(e))
 
 # --- Model ---
-with tab4:
+with tab_model:
     st.subheader("Model card")
     if report:
         c1, c2, c3, c4 = st.columns(4)
@@ -487,8 +420,9 @@ with tab4:
 **Features:** Elo diff, rest / B2B / games-in-7 (rest capped at 7), rolling form diffs,  
 efficiency-weighted player deficit diff (`Out` only at serve; DNP proxy in train).
 
-**Not production:** BiLSTM (held for comparison only).  
-**Not automatic:** nightly fetch refreshes features; coefficients change only on deliberate retrain.
+**Methodology:** Features are pre-game only. Absence uses a shared deficit function in
+training and serving. Nightly Actions refresh the slate via ESPN; coefficients change
+only on a deliberate retrain. BiLSTM is research-only and not production.
 """
     )
     formula = meta.get(
@@ -496,104 +430,99 @@ efficiency-weighted player deficit diff (`Out` only at serve; DNP proxy in train
         "PTS + 0.4*FGM - 0.7*FGA - 0.4*(FTA-FTM) + 0.7*OREB + 0.3*DREB + STL + 0.7*AST + 0.7*BLK - 0.4*PF - TOV",
     )
     st.code(formula, language="text")
-    cols = meta.get("columns") or meta.get("selected_columns")
-    if cols:
-        st.write("Feature columns:", ", ".join(f"`{c}`" for c in cols))
 
-# --- Projections ---
-with tab5:
-    st.subheader("All projections")
-    d = preds_df.copy()
-    for c in ("Home_Win_Prob", "Away_Win_Prob", "Confidence"):
-        if c in d.columns:
-            d[c] = d[c].map(lambda x: f"{float(x):.1%}")
-    keep = [
-        c
-        for c in (
-            "Home_Team",
-            "Away_Team",
-            "Home_Win_Prob",
-            "Away_Win_Prob",
-            "Predicted_Winner",
-            "Confidence",
-            "Home_Player_Deficit",
-            "Away_Player_Deficit",
-            "Model",
+    if coefs:
+        st.markdown("#### Coefficients")
+        coef_df = (
+            pd.DataFrame({"feature": list(coefs.keys()), "coef": list(coefs.values())})
+            .sort_values("coef", key=lambda s: s.abs(), ascending=False)
         )
-        if c in d.columns
-    ]
-    st.dataframe(d[keep], hide_index=True, use_container_width=True)
+        st.bar_chart(coef_df.set_index("feature")["coef"], horizontal=True)
+
+    cal_path = "artifacts/calibration_holdout.png"
+    if os.path.exists(cal_path):
+        st.markdown("#### Holdout calibration")
+        st.image(cal_path, use_container_width=True)
 
 # --- Validation ---
-with tab6:
-    st.subheader("Historical preds vs results")
-    selected_date = st.date_input("Date", datetime.date.today())
-    history_file = f"history/preds_{selected_date.strftime('%Y-%m-%d')}.csv"
-    if not os.path.exists(history_file):
-        st.warning(f"No file `{history_file}`.")
+with tab_val:
+    st.subheader("Predictions vs final scores")
+    dates = list_pred_dates()
+    if not dates:
+        st.info("No graded history files yet under history/preds_*.csv.")
     else:
-        hist_df = pd.read_csv(history_file)
-        if "Predicted_Winner" not in hist_df.columns:
-            st.info("Legacy format — skip.")
-        elif not os.path.exists("nba_stats.db"):
-            st.info("Need `nba_stats.db` (or unpacked slim DB) to score actuals.")
+        # Default to latest date that has ESPN finals
+        default_idx = len(dates) - 1
+        default_date = dates[default_idx]
+        for d in reversed(dates):
+            g = grade_preds(load_preds(d), d)
+            if not g.empty:
+                default_date = d
+                break
+        selected = st.selectbox(
+            "Date",
+            options=list(reversed(dates)),
+            index=list(reversed(dates)).index(default_date),
+        )
+        day_preds = load_preds(selected)
+        graded = grade_preds(day_preds, selected)
+        if graded.empty:
+            st.info("No final scores available for that date yet (or GAME_ID/name mismatch).")
         else:
-            try:
-                conn = sqlite3.connect("nba_stats.db")
-                # GAME_DATE in DB is often 'YYYY-MM-DD' after modern backfill
-                day = selected_date.isoformat()
-                actuals = pd.read_sql(
-                    "SELECT DISTINCT Game_ID, WL, MATCHUP, GAME_DATE FROM player_logs "
-                    "WHERE GAME_DATE LIKE ?",
-                    conn,
-                    params=(f"%{day}%",),
+            a, b, c = st.columns(3)
+            a.metric("Games", len(graded))
+            b.metric("Accuracy", f"{graded['Hit'].mean():.0%}")
+            y = graded["home_win"].astype(int).values
+            p = graded["Home_Win_Prob"].astype(float).clip(1e-6, 1 - 1e-6).values
+            from sklearn.metrics import log_loss
+
+            c.metric("Log loss", f"{log_loss(y, p, labels=[0, 1]):.3f}")
+            view = graded[
+                ["Matchup", "Predicted_Winner", "Actual_Winner", "Home_Win_Prob", "Hit"]
+            ].copy()
+            view["Home_Win_Prob"] = view["Home_Win_Prob"].map(lambda x: f"{float(x):.0%}")
+            view["Hit"] = view["Hit"].map(lambda x: "yes" if int(x) else "no")
+            st.dataframe(view, hide_index=True, use_container_width=True)
+
+        st.markdown("#### Rolling 2026-27 (history with results)")
+        # Prefer dates in the live season window
+        live_dates = [d for d in dates if d >= "2026-10-01"]
+        all_g, metrics = summarize_season(live_dates or dates)
+        if not metrics:
+            st.caption("Not enough completed games in history to score yet.")
+        else:
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("N", metrics["n"])
+            m2.metric("Accuracy", f"{metrics['accuracy']:.1%}")
+            m3.metric("Log loss", f"{metrics['log_loss']:.3f}")
+            m4.metric("Brier", f"{metrics['brier']:.3f}")
+            b1, b2 = st.columns(2)
+            b1.metric("Home-always acc", f"{metrics['home_always_acc']:.1%}")
+            b2.metric("Home-always log loss (p=0.55)", f"{metrics['home_always_ll']:.3f}")
+
+            # Simple calibration table
+            if len(all_g) >= 5:
+                bins = pd.cut(all_g["Home_Win_Prob"], bins=np.linspace(0, 1, 6), include_lowest=True)
+                cal = (
+                    all_g.assign(bin=bins)
+                    .groupby("bin", observed=False)
+                    .agg(pred=("Home_Win_Prob", "mean"), actual=("home_win", "mean"), n=("home_win", "size"))
+                    .dropna()
                 )
-                if actuals.empty:
-                    # try old NBA format
-                    actuals = pd.read_sql(
-                        "SELECT DISTINCT Game_ID, WL, MATCHUP, GAME_DATE FROM player_logs "
-                        "WHERE GAME_DATE = ?",
-                        conn,
-                        params=(selected_date.strftime("%b %d, %Y"),),
-                    )
-                conn.close()
-                if actuals.empty:
-                    st.info("No results in DB for that date.")
-                else:
-                    actuals["Game_ID"] = _norm_game_id(actuals["Game_ID"])
-                    hist_df = hist_df.copy()
-                    hist_df["GAME_ID"] = _norm_game_id(hist_df["GAME_ID"])
-                    results, correct, total = [], 0, 0
-                    for _, pr in hist_df.iterrows():
-                        hr = actuals[
-                            (actuals["Game_ID"] == pr["GAME_ID"])
-                            & (actuals["MATCHUP"].astype(str).str.contains("vs.", na=False))
-                        ]
-                        if hr.empty:
-                            continue
-                        actual_winner = (
-                            pr["Home_Team"] if hr.iloc[0]["WL"] == "W" else pr["Away_Team"]
-                        )
-                        ok = pr["Predicted_Winner"] == actual_winner
-                        correct += int(ok)
-                        total += 1
-                        results.append(
-                            {
-                                "Matchup": f"{pr['Away_Team']} @ {pr['Home_Team']}",
-                                "Predicted": pr["Predicted_Winner"],
-                                "Actual": actual_winner,
-                                "Conf": f"{float(pr['Confidence']):.0%}",
-                                "Hit": "yes" if ok else "no",
-                            }
-                        )
-                    if results:
-                        a, b = st.columns(2)
-                        a.metric("Games", total)
-                        b.metric("Accuracy", f"{correct / total:.0%}")
-                        st.dataframe(
-                            pd.DataFrame(results),
-                            hide_index=True,
-                            use_container_width=True,
-                        )
-            except Exception as e:
-                st.error(str(e))
+                st.markdown("##### Calibration (binned)")
+                st.dataframe(
+                    cal.style.format({"pred": "{:.2f}", "actual": "{:.2f}"}),
+                    use_container_width=True,
+                )
+                try:
+                    import matplotlib.pyplot as plt
+
+                    fig, ax = plt.subplots(figsize=(4, 4))
+                    ax.plot([0, 1], [0, 1], "--", color="gray")
+                    ax.scatter(cal["pred"], cal["actual"], s=cal["n"] * 8)
+                    ax.set_xlabel("Predicted P(home)")
+                    ax.set_ylabel("Actual home win rate")
+                    ax.set_title("Live calibration")
+                    st.pyplot(fig, clear_figure=True)
+                except Exception:
+                    pass

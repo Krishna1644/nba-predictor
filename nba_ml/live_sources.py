@@ -249,6 +249,9 @@ class EspnSource:
         payload = resp.json()
         rows = []
         for team_block in payload.get("injuries", []):
+            espn_tid = team_block.get("id")
+            nba_tid = espn_team_id_to_nba(espn_tid)
+            team_label = team_block.get("displayName") or ""
             for inj in team_block.get("injuries", []):
                 athlete = inj.get("athlete") or {}
                 player = (
@@ -271,6 +274,8 @@ class EspnSource:
                         "Player": player,
                         "Injury": detail or injury_type or "Undisclosed",
                         "Status": status,
+                        "TeamID": int(nba_tid) if nba_tid is not None else None,
+                        "Team": team_label,
                     }
                 )
         if not rows:
@@ -336,6 +341,10 @@ def fetch_with_fallback(
 
 
 def rosters_from_db(team_ids: list[int], db_path: str = DB_NAME) -> pd.DataFrame:
+    """
+    Build tonight's rosters from DB using each player's most recent team
+    in the latest available season (avoids stale TEAM_ID mislabels).
+    """
     if not team_ids or not os.path.exists(db_path):
         return _empty_rosters()
     conn = sqlite3.connect(db_path)
@@ -349,84 +358,143 @@ def rosters_from_db(team_ids: list[int], db_path: str = DB_NAME) -> pd.DataFrame
     season_id = str(seasons.iloc[0]["SEASON_ID"])
     if LIVE_SEASON in set(seasons["SEASON_ID"].astype(str)):
         season_id = LIVE_SEASON
-    placeholders = ",".join("?" for _ in team_ids)
-    q = f"""
-        SELECT DISTINCT TEAM_ID as TeamID, Player_ID as PLAYER_ID,
-               PLAYER_NAME as PLAYER, '' as POSITION
+    # Most recent game per player → current team
+    q = """
+        SELECT Player_ID, PLAYER_NAME, TEAM_ID, GAME_DATE
         FROM player_logs
-        WHERE SEASON_ID = ? AND TEAM_ID IN ({placeholders})
+        WHERE SEASON_ID = ?
     """
-    df = pd.read_sql(q, conn, params=[season_id, *[int(t) for t in team_ids]])
-    conn.close()
-    if df.empty:
-        return _empty_rosters()
-    return df[ROSTER_COLS]
-
-
-def compute_schedule_context(
-    games: pd.DataFrame,
-    rosters: pd.DataFrame | None = None,
-    db_path: str = DB_NAME,
-    game_date: str | None = None,
-) -> pd.DataFrame:
-    day = game_date or nba_today_str()
-    today_dt = pd.to_datetime(day)
-    if games.empty:
-        return pd.DataFrame(columns=CONTEXT_COLS)
-    team_ids = (
-        pd.concat([games["HOME_TEAM_ID"], games["VISITOR_TEAM_ID"]]).astype(int).unique()
-    )
-    if not os.path.exists(db_path):
-        return pd.DataFrame(
-            [
-                {
-                    "TEAM_ID": int(tid),
-                    "rest_days": 3,
-                    "is_back_to_back": 0,
-                    "games_last_7": 0,
-                }
-                for tid in team_ids
-            ]
-        )
-
-    conn = sqlite3.connect(db_path)
-    logs = pd.read_sql("SELECT GAME_DATE, TEAM_ID, Player_ID FROM player_logs", conn)
+    logs = pd.read_sql(q, conn, params=[season_id])
     conn.close()
     if logs.empty:
-        return pd.DataFrame(
-            [
-                {
-                    "TEAM_ID": int(tid),
-                    "rest_days": 3,
-                    "is_back_to_back": 0,
-                    "games_last_7": 0,
-                }
-                for tid in team_ids
-            ]
-        )
+        return _empty_rosters()
+    logs["GAME_DATE"] = pd.to_datetime(logs["GAME_DATE"], format="mixed")
+    latest = (
+        logs.sort_values("GAME_DATE")
+        .groupby("Player_ID", as_index=False)
+        .tail(1)
+    )
+    latest = latest[latest["TEAM_ID"].isin([int(t) for t in team_ids])]
+    if latest.empty:
+        return _empty_rosters()
+    out = latest.rename(
+        columns={
+            "TEAM_ID": "TeamID",
+            "Player_ID": "PLAYER_ID",
+            "PLAYER_NAME": "PLAYER",
+        }
+    )
+    out["POSITION"] = ""
+    return out[ROSTER_COLS].drop_duplicates(subset=["TeamID", "PLAYER_ID"])
 
-    logs["GAME_DATE_PARSED"] = pd.to_datetime(logs["GAME_DATE"], format="mixed")
+
+def live_season_start(game_date: str) -> pd.Timestamp:
+    """NBA season spanning Oct–Jun; date 2026-11-20 → season start 2026-10-01."""
+    dt = pd.Timestamp(game_date)
+    year = dt.year if dt.month >= 8 else dt.year - 1
+    return pd.Timestamp(f"{year}-10-01")
+
+
+def fetch_espn_team_game_dates(
+    as_of: str,
+    days_back: int = 21,
+) -> pd.DataFrame:
+    """
+    Recent final games from ESPN scoreboards (cloud-safe).
+    Returns columns: TEAM_ID, GAME_DATE (date only, America/New_York calendar).
+    """
+    end = datetime.strptime(as_of, "%Y-%m-%d").date()
+    rows: list[dict] = []
+    for offset in range(1, days_back + 1):  # exclude as_of itself (pre-game)
+        day = end - timedelta(days=offset)
+        stamp = day.strftime("%Y%m%d")
+        try:
+            resp = requests.get(
+                EspnSource.SCOREBOARD,
+                params={"dates": stamp},
+                headers=ESPN_HEADERS,
+                timeout=30,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception as exc:
+            print(f"  [espn] scoreboard {stamp} failed: {exc}")
+            continue
+        for event in payload.get("events", []):
+            comps = event.get("competitions") or []
+            if not comps:
+                continue
+            comp = comps[0]
+            status_name = ((comp.get("status") or {}).get("type") or {}).get("name", "")
+            if status_name and status_name != "STATUS_FINAL":
+                # Still count completed; skip scheduled/in-progress for rest history
+                completed = ((comp.get("status") or {}).get("type") or {}).get(
+                    "completed", False
+                )
+                if not completed:
+                    continue
+            for c in comp.get("competitors", []):
+                nba_id = espn_team_id_to_nba(c.get("team", {}).get("id"))
+                if nba_id is None:
+                    continue
+                rows.append({"TEAM_ID": int(nba_id), "GAME_DATE": pd.Timestamp(day)})
+    if not rows:
+        return pd.DataFrame(columns=["TEAM_ID", "GAME_DATE"])
+    return pd.DataFrame(rows).drop_duplicates()
+
+
+def team_dates_from_db(
+    team_ids: list[int],
+    as_of: str,
+    db_path: str = DB_NAME,
+    season_start: pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    """Current-season (or since season_start) team game dates from player_logs."""
+    if not team_ids or not os.path.exists(db_path):
+        return pd.DataFrame(columns=["TEAM_ID", "GAME_DATE"])
+    start = season_start or live_season_start(as_of)
+    conn = sqlite3.connect(db_path)
+    placeholders = ",".join("?" for _ in team_ids)
+    q = f"""
+        SELECT DISTINCT TEAM_ID, GAME_DATE
+        FROM player_logs
+        WHERE TEAM_ID IN ({placeholders})
+    """
+    logs = pd.read_sql(q, conn, params=[int(t) for t in team_ids])
+    conn.close()
+    if logs.empty:
+        return pd.DataFrame(columns=["TEAM_ID", "GAME_DATE"])
+    logs["GAME_DATE"] = pd.to_datetime(logs["GAME_DATE"], format="mixed")
+    as_of_ts = pd.Timestamp(as_of)
+    logs = logs[(logs["GAME_DATE"] >= start) & (logs["GAME_DATE"] < as_of_ts)]
+    return logs[["TEAM_ID", "GAME_DATE"]].drop_duplicates()
+
+
+def rest_features_from_dates(
+    team_ids: list[int],
+    dates_df: pd.DataFrame,
+    as_of: str,
+) -> pd.DataFrame:
+    """
+    Same rest / B2B / games_last_7 rules as training
+    (nba_ml.features.build_team_game_features schedule block).
+    """
+    today_dt = pd.Timestamp(as_of)
+    seven_ago = today_dt - timedelta(days=7)
     rows = []
     for tid in team_ids:
         team_dates = (
-            logs.loc[logs["TEAM_ID"] == int(tid), "GAME_DATE_PARSED"]
+            dates_df.loc[dates_df["TEAM_ID"] == int(tid), "GAME_DATE"]
             .drop_duplicates()
             .sort_values(ascending=False)
         )
-        if len(team_dates) == 0 and rosters is not None and not rosters.empty:
-            pids = rosters.loc[rosters["TeamID"] == int(tid), "PLAYER_ID"].unique()
-            team_dates = (
-                logs.loc[logs["Player_ID"].isin(pids), "GAME_DATE_PARSED"]
-                .drop_duplicates()
-                .sort_values(ascending=False)
-            )
         if len(team_dates) > 0:
             rest_days = int(min((today_dt - team_dates.iloc[0]).days, REST_DAYS_CAP))
             is_b2b = 1 if rest_days == 1 else 0
-            seven_ago = today_dt - timedelta(days=7)
             games_last_7 = int((team_dates >= seven_ago).sum())
         else:
-            rest_days, is_b2b, games_last_7 = 3, 0, 0
+            # No prior games this season yet — treat as full rest, not stale history
+            rest_days, is_b2b, games_last_7 = REST_DAYS_CAP, 0, 0
         rows.append(
             {
                 "TEAM_ID": int(tid),
@@ -436,6 +504,69 @@ def compute_schedule_context(
             }
         )
     return pd.DataFrame(rows)[CONTEXT_COLS]
+
+
+def compute_schedule_context(
+    games: pd.DataFrame,
+    rosters: pd.DataFrame | None = None,
+    db_path: str = DB_NAME,
+    game_date: str | None = None,
+    use_espn: bool = True,
+    espn_days_back: int = 21,
+) -> pd.DataFrame:
+    """
+    Rest / B2B / games_last_7 for tonight's teams.
+
+    Prefers current-season dates: ESPN recent finals (cloud-safe) ∪ DB rows
+    since season start. Ignores prior-season logs so a stale DB cannot force
+    every team to rest_days=7.
+    """
+    del rosters  # reserved for callers; dates come from ESPN/DB TEAM_ID
+    day = game_date or nba_today_str()
+    if games.empty:
+        return pd.DataFrame(columns=CONTEXT_COLS)
+    team_ids = (
+        pd.concat([games["HOME_TEAM_ID"], games["VISITOR_TEAM_ID"]])
+        .astype(int)
+        .unique()
+        .tolist()
+    )
+    frames = [team_dates_from_db(team_ids, day, db_path=db_path)]
+    if use_espn:
+        try:
+            espn_dates = fetch_espn_team_game_dates(day, days_back=espn_days_back)
+            espn_dates = espn_dates[espn_dates["TEAM_ID"].isin(team_ids)]
+            frames.append(espn_dates)
+            print(f"  [schedule] ESPN recent finals: {len(espn_dates)} team-games")
+        except Exception as exc:
+            print(f"  [schedule] ESPN dates failed: {exc}")
+    dates_df = pd.concat(frames, ignore_index=True)
+    if not dates_df.empty:
+        dates_df = dates_df.drop_duplicates()
+    ctx = rest_features_from_dates(team_ids, dates_df, day)
+    print(
+        "  [schedule] rest summary:",
+        ctx.groupby(["rest_days", "is_back_to_back", "games_last_7"]).size().to_dict(),
+    )
+    return ctx
+
+
+def assert_schedule_context_varies(ctx: pd.DataFrame, min_teams: int = 4) -> None:
+    """Raise if every team shares the same rest/B2B/g7 triple (stale-DB smell)."""
+    if ctx is None or len(ctx) < min_teams:
+        return
+    combos = set(
+        zip(
+            ctx["rest_days"].astype(int),
+            ctx["is_back_to_back"].astype(int),
+            ctx["games_last_7"].astype(int),
+        )
+    )
+    if len(combos) <= 1:
+        raise AssertionError(
+            f"All {len(ctx)} teams share identical rest values {combos.pop()} — "
+            "schedule context looks stale or broken."
+        )
 
 
 def write_live_bundle(
