@@ -1,0 +1,5 @@
+best_model=logistic
+selection_metric=log_loss
+log_loss=0.597458
+brier=0.206574
+accuracy=0.668571

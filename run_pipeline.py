@@ -42,24 +42,24 @@ def run_script(script_name, args=[]):
         return False
 
 def check_model_exists():
-    """Pre-flight check: ensure LSTM model artifacts are present."""
-    model_path = os.path.join(MODELS_DIR, 'lstm_model.keras')
-    scaler_path = os.path.join(MODELS_DIR, 'scaler.pkl')
-    
+    """Pre-flight check: production logistic model + Elo ratings."""
+    model_path = os.path.join(MODELS_DIR, "logistic_baseline.pkl")
+    elo_path = os.path.join(MODELS_DIR, "elo_ratings.json")
+
     if not os.path.exists(model_path):
         log(f"MODEL NOT FOUND: {model_path}")
-        log("Train the model in Colab first, then place files in models/")
+        log("Run: python build_datasets.py && python train_baseline.py")
         return False
-    if not os.path.exists(scaler_path):
-        log(f"SCALER NOT FOUND: {scaler_path}")
+    if not os.path.exists(elo_path):
+        log(f"ELO NOT FOUND: {elo_path}")
         return False
-    
+
     log(f"Model found: {model_path}")
     return True
 
 def main():
     ensure_folders()
-    log("=== PIPELINE STARTED (LSTM) ===")
+    log("=== PIPELINE STARTED (logistic matchup) ===")
     
     # 1. Pre-flight: Check for trained model
     if not check_model_exists():
@@ -83,12 +83,12 @@ def main():
         log("Stats fetch failed. Aborting.")
         return
 
-    # 3. Generate Predictions
-    log(">>> STEP 5: Running LSTM predictions...")
-    if not run_script("predict_tonight.py"):
+    # 3. Generate Predictions (logistic matchup is the production model)
+    log(">>> STEP 5: Running logistic matchup predictions...")
+    if not run_script("predict_matchup.py"):
         log("Prediction failed.")
         return
-    
+
     log("=== PIPELINE COMPLETE ===")
 
 if __name__ == "__main__":

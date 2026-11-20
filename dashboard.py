@@ -13,8 +13,9 @@ except ImportError:
     genai = None
 
 # 1. SETUP
-st.set_page_config(page_title="NBA LSTM Predictor", layout="wide", page_icon="🏀")
-st.title("🏀 NBA AI Prediction Engine")
+st.set_page_config(page_title="NBA Win Probability", layout="wide")
+st.title("NBA Win Probability")
+st.caption("Production model: logistic matchup (Elo + schedule + form). LSTM kept for holdout comparison only.")
 
 # 2. LOAD DATA
 @st.cache_data(ttl=600)  # Clear cache every 10 mins
@@ -332,31 +333,26 @@ with tab3:
 
 # --- TAB 4: MODEL ARCHITECTURE ---
 with tab4:
-    st.header("🧠 BiLSTM + Attention Architecture")
+    st.header("Model card")
     st.markdown("""
-    ### Deep Learning Topology
-    ```
-    Input:   (10 games × 24 features)
-        ↓
-    BiLSTM:  128 units (64 per direction), return_sequences=True
-    Dropout: 0.3
-        ↓
-    BiLSTM:  64 units (32 per direction), return_sequences=True
-    Dropout: 0.3
-        ↓
-    Attention: Learns which games in the rolling window matter most
-        ↓
-    Dense:   16 units, ReLU
-    Dropout: 0.3
-        ↓
-    Output:  1 unit, Sigmoid → Win Probability
-    ```
-    """)
-    st.markdown("### Feature Matrix Definition")
-    c1, c2, c3 = st.columns(3)
-    c1.markdown("**Performance (9)**\n- PTS, REB, AST, STL, BLK, TOV\n- Max PTS, REB, AST (Absence Proxy)")
-    c2.markdown("**Efficiency/Strength (11)**\n- FG%, 3P%, FT%, eFG%, TS%, TOV%\n- Plus/Minus, Home Flag\n- Team Elo, Opp Win%, Opp Def Rtg")
-    c3.markdown("**Situational (4)**\n- Rest Days, Back-to-Back, Games in 7d\n- Missing Starter Minutes")
+**Shipped model:** logistic regression on one row per game (home win probability).
+
+**Holdout (2024-25, n=1225):** logistic beat Elo-only and BiLSTM on log loss / Brier / AUC.
+See `artifacts/holdout_metrics.md` and `README.md`.
+
+```
+Features → StandardScaler → LogisticRegression
+  elo_diff, rest/b2b/g7 diffs, missing-starter diff,
+  rolling form diffs (pts/reb/ast/+/−), home_court
+Output → P(home win) ∈ (0,1)   (away = 1 − home)
+```
+
+**Retired from production:** BiLSTM + Attention (10×24 sequences). It remains in
+`train_lstm.py` / `evaluate_holdout.py` so the comparison is reproducible.
+
+**Leakage controls:** starter minutes use prior-game expanding means only;
+train/val is chronological; test season is fully held out (2024-25).
+""")
     
 # --- TAB 5: PROJECTIONS ---
 with tab5:
@@ -397,7 +393,7 @@ with tab6:
                     if results:
                         c1, c2 = st.columns(2)
                         c1.metric("Games Evaluated", total)
-                        c2.metric("Neural Net Accuracy", f"{(correct/total):.1%}")
+                        c2.metric("Prediction Accuracy", f"{(correct/total):.1%}")
                         st.dataframe(pd.DataFrame(results), hide_index=True, use_container_width=True)
             except Exception as e: st.error(f"Error checking DB results: {e}")
         else: st.info("Legacy prediction format detected. Validation off.")

@@ -1,31 +1,42 @@
 # Python
 __pycache__/
 *.pyc
+*.pyo
+.venv/
+venv/
+.env
 
-# Data & Database
-# nba_stats.db (Included for Streamlit Cloud Demo)
-# data/
+# Secrets
+.streamlit/secrets.toml
+.streamlit/
 
-# Logs
+# Local databases & large arrays (rebuild with build_datasets.py)
+nba_stats.db
+*.npy
+
+# Heavy intermediate artifacts (metrics/plots/csvs below are kept)
+artifacts/*.pkl
+artifacts/matchup_arrays.npz
+
+# Model binaries (keep the small shipped logistic model)
+models/*.keras
+models/game_context.pkl
+models/scaler.pkl
+!models/logistic_baseline.pkl
+!models/elo_ratings.json
+!models/logistic_coefficients.json
+
+# Daily pipeline outputs
+todays_games.csv
+todays_rosters.csv
+injuries.csv
+schedule_context.csv
+final_predictions.csv
 logs/
 pipeline_log.txt
 
-# Dynamic Outputs
-# todays_games.csv
-# todays_rosters.csv
-# final_predictions.csv
-# injuries.csv
-
-# History (Optional: Remove if you want to track history)
-# history/
-
-# Environment
-.env
-venv/
-.streamlit/
-
-# LSTM Model Artifacts
-models/
-!models/elo_ratings.json
-*.npy
-schedule_context.csv
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
