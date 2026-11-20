@@ -26,7 +26,7 @@ Predicts regular-season NBA game winners with **calibrated home-win probabilitie
 - Calibration on VAL: **none** edged Platt/sigmoid; isotonic worse. Re-checked each retrain.
 - Train/val pool: seasons **2015-16 → 2024-25** (`SEASON_ID <= 22024`).
 - **2025-26 is report-only** (never used to pick features / calib).
-- **Live:** 2026-27 (`fetch_*` + `run_pipeline.py`).
+- **Live:** 2026-27 (`scripts/fetch_live.py` + `run_pipeline.py`).
 - Replacement-at-position: **skipped** (no reliable position in box logs).
 
 **Efficiency formula (shipped):**  
@@ -88,8 +88,10 @@ python build_datasets.py
 python train_baseline.py
 python evaluate_holdout.py          # writes artifacts/holdout_metrics.*
 
-# Daily predictions:
+# Daily predictions (local: nba_api → ESPN fallback):
 python run_pipeline.py
+# Cloud / Actions equivalent:
+# python run_pipeline.py --source espn --skip-stats
 streamlit run dashboard.py
 ```
 
@@ -106,20 +108,24 @@ python evaluate_holdout.py
 
 The Streamlit app reads **precomputed CSVs** under `data/live/` (fallback: repo root). It does not retrain.
 
+**Why two sources:** `stats.nba.com` blocks GitHub Actions / data-center IPs. Home IPs usually work. ESPN’s public JSON works from cloud.
+
+| Where | Extract source | What it refreshes |
+| --- | --- | --- |
+| Your PC | `nba_api` (fallback ESPN) | schedule, injuries, rosters, optional player-log refresh |
+| GitHub Actions | **ESPN only** | schedule + injuries; rosters/rest from slim DB |
+
 1. Deploy the app on [Streamlit Community Cloud](https://streamlit.io/cloud) from this repo (`dashboard.py`).
-2. Enable GitHub Action `.github/workflows/daily_predict.yml` (cron ~14:00 UTC / workflow_dispatch).
-3. Slim DB is **committed** as `data/nba_stats_live.db.gz` (~3MB; last 2–3 seasons only). Refresh with:
+2. Enable GitHub Action `.github/workflows/daily_predict.yml` (cron ~14:00 UTC / workflow_dispatch). It runs `python run_pipeline.py --source espn --skip-stats`.
+3. Slim DB is **committed** as `data/nba_stats_live.db.gz` (~3MB; last 2–3 seasons). Refresh locally after a stats pull:
    ```bash
+   python scripts/fetch_live.py          # home IP; refreshes nba_stats.db
    python scripts/export_live_db.py
+   gzip -c nba_stats_live.db > data/nba_stats_live.db.gz
    ```
-   Full `nba_stats.db` stays local for training — daily Actions never need 2015–23.
-4. Streamlit Cloud redeploys when Actions commits `data/live/`; cache TTL is 10 minutes.
+4. Streamlit Cloud redeploys when Actions commits `data/live/` (+ injury snapshots); cache TTL is 10 minutes.
 
-Local equivalent:
-
-```bash
-python run_pipeline.py   # writes final_predictions.csv and data/live/
-```
+Same interface for both providers: `nba_ml/live_sources.py` (`NbaApiSource` / `EspnSource`).
 
 ---
 
@@ -134,9 +140,12 @@ python run_pipeline.py   # writes final_predictions.csv and data/live/
 | `train_lstm.py` | BiLSTM + Attention (research / comparison) |
 | `evaluate_holdout.py` | Holdout leaderboard |
 | `predict_matchup.py` | Production inference |
-| `run_pipeline.py` | Daily fetch + predict |
+| `scripts/fetch_live.py` | Live extract (nba_api / ESPN) → `data/live/` |
+| `nba_ml/live_sources.py` | Shared live-data interface + providers |
+| `run_pipeline.py` | Extract + predict (use `--source espn` in CI) |
 | `dashboard.py` | Streamlit UI |
 | `data/live/` | Tracked nightly outputs for the website |
+| `data/injury_snapshots/` | Append-only daily injury CSVs |
 | `artifacts/` | Holdout metrics, calibration plots, preds |
 | `_archive/` | Old heuristic weight tuner (retired) |
 
