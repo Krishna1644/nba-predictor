@@ -68,14 +68,16 @@ MATCHUP_CORE_FEATURES = [
     "form_pm_diff",
 ]
 
-# Absence feature variants — pick impact vs minutes on validation only.
-# Legacy missing_starter_diff is retained in exports for analysis, not production.
+# Absence feature variants — pick on validation only (never on test).
+# Legacy missing_starter_diff kept in exports for analysis, not production.
 ABSENCE_FEATURE_STARTER = "missing_starter_diff"
-ABSENCE_FEATURE_PLAYER = "player_deficit_diff"  # impact composite
-ABSENCE_FEATURE_MINUTES = "player_deficit_minutes_diff"  # minutes comparison
+ABSENCE_FEATURE_PLAYER = "player_deficit_diff"  # counting impact
+ABSENCE_FEATURE_EFF = "player_deficit_eff_diff"  # efficiency-weighted impact
+ABSENCE_FEATURE_MINUTES = "player_deficit_minutes_diff"
 
 MATCHUP_FEATURE_COLUMNS = MATCHUP_CORE_FEATURES + [
     ABSENCE_FEATURE_PLAYER,
+    ABSENCE_FEATURE_EFF,
     ABSENCE_FEATURE_MINUTES,
     ABSENCE_FEATURE_STARTER,
 ]
@@ -108,8 +110,11 @@ def compute_team_absence_deficit(
     Sums pre-game blended `value_key` for each missing player id, excluding
     anyone who has already missed MAX_CONSECUTIVE_MISSES+ team games in a row.
 
-    Default value_key='impact' (PTS + 1.5*AST + REB + STL + BLK - TOV).
-    Use value_key='minutes' for the minutes-based comparison column.
+    value_key options:
+      'impact'     — counting: PTS + 1.5*AST + REB + STL + BLK - TOV
+      'impact_eff' — efficiency: PTS + 0.4*FGM - 0.7*FGA - 0.4*(FTA-FTM)
+                     + 0.7*OREB + 0.3*DREB + STL + 0.7*AST + 0.7*BLK - 0.4*PF - TOV
+      'minutes'    — blended MPG
 
     Callers build `missing_player_ids` (train: DNP rotation; serve: Status==Out)
     and `prior_lookup` (pre-game only). This function does not branch on path.
@@ -147,14 +152,50 @@ def player_impact(
     stl: float = 0.0,
     blk: float = 0.0,
     tov: float = 0.0,
+    **_ignored,
 ) -> float:
-    """Pre-game per-game composite: PTS + 1.5*AST + REB + STL + BLK - TOV."""
+    """Counting composite: PTS + 1.5*AST + REB + STL + BLK - TOV."""
     return (
         float(pts)
         + 1.5 * float(ast)
         + float(reb)
         + float(stl)
         + float(blk)
+        - float(tov)
+    )
+
+
+def player_impact_eff(
+    pts: float,
+    fgm: float,
+    fga: float,
+    ftm: float,
+    fta: float,
+    oreb: float,
+    dreb: float,
+    stl: float,
+    ast: float,
+    blk: float,
+    pf: float,
+    tov: float,
+    **_ignored,
+) -> float:
+    """
+    Efficiency-weighted box score value:
+    PTS + 0.4*FGM - 0.7*FGA - 0.4*(FTA-FTM)
+    + 0.7*OREB + 0.3*DREB + STL + 0.7*AST + 0.7*BLK - 0.4*PF - TOV
+    """
+    return (
+        float(pts)
+        + 0.4 * float(fgm)
+        - 0.7 * float(fga)
+        - 0.4 * (float(fta) - float(ftm))
+        + 0.7 * float(oreb)
+        + 0.3 * float(dreb)
+        + float(stl)
+        + 0.7 * float(ast)
+        + 0.7 * float(blk)
+        - 0.4 * float(pf)
         - float(tov)
     )
 
@@ -401,11 +442,12 @@ def build_team_game_features(player_logs: pd.DataFrame, models_dir: str = MODELS
         logs, team_games
     )
 
-    print("  Computing player_deficit impact + minutes (shared deficit fn)...")
+    print("  Computing player_deficit counting/eff/minutes (shared deficit fn)...")
     from nba_ml.player_priors import compute_team_game_player_deficits
 
-    impact, minutes_def = compute_team_game_player_deficits(logs, team_games)
+    impact, impact_eff, minutes_def = compute_team_game_player_deficits(logs, team_games)
     team_games["player_deficit"] = impact
+    team_games["player_deficit_eff"] = impact_eff
     team_games["player_deficit_minutes"] = minutes_def
 
     print("  Computing schedule context...")
@@ -464,6 +506,7 @@ def build_matchup_frame(team_games: pd.DataFrame) -> pd.DataFrame:
         "games_last_7",
         "missing_starter_minutes",
         "player_deficit",
+        "player_deficit_eff",
         "player_deficit_minutes",
         "form_pts",
         "form_reb",
@@ -480,6 +523,7 @@ def build_matchup_frame(team_games: pd.DataFrame) -> pd.DataFrame:
             "games_last_7": "home_g7",
             "missing_starter_minutes": "home_missing_starter_min",
             "player_deficit": "home_player_deficit",
+            "player_deficit_eff": "home_player_deficit_eff",
             "player_deficit_minutes": "home_player_deficit_minutes",
             "form_pts": "home_form_pts",
             "form_reb": "home_form_reb",
@@ -497,6 +541,7 @@ def build_matchup_frame(team_games: pd.DataFrame) -> pd.DataFrame:
             "games_last_7": "away_g7",
             "missing_starter_minutes": "away_missing_starter_min",
             "player_deficit": "away_player_deficit",
+            "player_deficit_eff": "away_player_deficit_eff",
             "player_deficit_minutes": "away_player_deficit_minutes",
             "form_pts": "away_form_pts",
             "form_reb": "away_form_reb",
@@ -514,6 +559,9 @@ def build_matchup_frame(team_games: pd.DataFrame) -> pd.DataFrame:
         m["home_missing_starter_min"] - m["away_missing_starter_min"]
     )
     m["player_deficit_diff"] = m["home_player_deficit"] - m["away_player_deficit"]
+    m["player_deficit_eff_diff"] = (
+        m["home_player_deficit_eff"] - m["away_player_deficit_eff"]
+    )
     m["player_deficit_minutes_diff"] = (
         m["home_player_deficit_minutes"] - m["away_player_deficit_minutes"]
     )

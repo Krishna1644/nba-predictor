@@ -2,7 +2,7 @@
 
 Predicts regular-season NBA game winners with **calibrated home-win probabilities**.
 
-**Production model:** logistic regression + Platt (sigmoid) calibration on leak-safe matchup features, with **impact-weighted player deficit**  
+**Production model:** logistic + Platt calibration, **efficiency-weighted player deficit**  
 **Not production:** BiLSTM + Attention (comparison only)
 
 ### 2024-25 report (n=1225) — not used for selection
@@ -10,19 +10,29 @@ Predicts regular-season NBA game winners with **calibrated home-win probabilitie
 | Model | Accuracy | Log loss | Brier | AUC |
 | --- | ---: | ---: | ---: | ---: |
 | Elo only | 0.642 | 0.6280 | 0.2193 | 0.715 |
-| **Logistic impact + Platt (shipped)** | **0.675** | **0.5968** | **0.2058** | **0.738** |
-| Logistic minutes deficit (not selected) | 0.667 | 0.6002 | 0.2072 | 0.735 |
+| **Logistic efficiency + Platt (shipped)** | **0.678** | **0.5959** | **0.2054** | **0.739** |
+| Counting impact (not selected) | 0.675 | 0.5967 | 0.2058 | 0.738 |
+| Minutes deficit (not selected) | 0.667 | 0.6002 | 0.2072 | 0.735 |
 
 ### Validation selection notes
 
-- Absence family is **player deficit** (legacy `missing_starter` retired from production).
-- Impact vs minutes on VAL: impact log loss 0.6207 vs minutes 0.6225.
-- Paired bootstrap (1000 resamples) Δll(impact − minutes): **−0.0018 [−0.0032, −0.0003]** — CI excludes 0, impact wins.
-- Calibration on VAL: Platt (sigmoid) edged raw; isotonic was worse.
-- **2025-26 is frozen** and not scored yet.
-- Replacement-at-position adjustment: **skipped** (no reliable position field in box logs).
+| Absence value | VAL log loss | VAL Brier |
+| --- | ---: | ---: |
+| **Efficiency (shipped)** | **0.6201** | **0.2157** |
+| Counting | 0.6207 | 0.2159 |
+| Minutes | 0.6225 | 0.2167 |
 
-Impact formula: `PTS + 1.5*AST + REB + STL + BLK - TOV` (pre-game blend `w = gp/(gp+10)`).  
+- Paired bootstrap Δll(efficiency − counting): **−0.0006 [−0.0012, 0.0000]** (1000 resamples).
+- Calibration on VAL: **Platt (sigmoid)**; isotonic worse.
+- **2025-26 frozen** (not scored).
+- Replacement-at-position: **skipped** (no reliable position in box logs).
+
+**Efficiency formula (shipped):**  
+`PTS + 0.4·FGM − 0.7·FGA − 0.4·(FTA−FTM) + 0.7·OREB + 0.3·DREB + STL + 0.7·AST + 0.7·BLK − 0.4·PF − TOV`  
+(pre-game blend `w = gp/(gp+10)`).
+
+Counting (retired from production): `PTS + 1.5·AST + REB + STL + BLK − TOV`.
+
 Calibration plot: `artifacts/calibration_holdout.png`. Details: `artifacts/feature_selection.json`.
 
 ---

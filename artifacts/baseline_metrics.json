@@ -9,12 +9,21 @@
     "base_rate": 0.5444897959183673
   },
   {
-    "model": "logistic_impact_sigmoid/test_2024-25",
+    "model": "logistic_efficiency_sigmoid/test_2024-25",
+    "n": 1225,
+    "accuracy": 0.6783673469387755,
+    "log_loss": 0.5958594613742788,
+    "brier": 0.20541999755255003,
+    "auc": 0.739428672760394,
+    "base_rate": 0.5444897959183673
+  },
+  {
+    "model": "logistic_counting/test_2024-25_not_selected",
     "n": 1225,
     "accuracy": 0.6751020408163265,
-    "log_loss": 0.5967646604797958,
-    "brier": 0.20578386682472052,
-    "auc": 0.7382545286496537,
+    "log_loss": 0.5967353753887729,
+    "brier": 0.2057883537154915,
+    "auc": 0.738233034020624,
     "base_rate": 0.5444897959183673
   },
   {
@@ -27,12 +36,21 @@
     "base_rate": 0.5444897959183673
   },
   {
-    "model": "logistic_impact/val",
+    "model": "logistic_counting/val",
     "n": 2189,
     "accuracy": 0.645043398812243,
     "log_loss": 0.6207109911188324,
     "brier": 0.21591163219303483,
     "auc": 0.7036608495158759,
+    "base_rate": 0.5555047967108269
+  },
+  {
+    "model": "logistic_efficiency/val",
+    "n": 2189,
+    "accuracy": 0.6441297396071265,
+    "log_loss": 0.6201412483187785,
+    "brier": 0.2156578663386742,
+    "auc": 0.7044823727484179,
     "base_rate": 0.5555047967108269
   },
   {

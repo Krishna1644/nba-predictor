@@ -15,12 +15,7 @@ import sqlite3
 import joblib
 import pandas as pd
 
-from nba_ml.features import (
-    LOOKBACK,
-    REST_DAYS_CAP,
-    STARTER_MIN_THRESHOLD,
-    compute_team_absence_deficit,
-)
+from nba_ml.features import LOOKBACK, REST_DAYS_CAP, compute_team_absence_deficit
 from nba_ml.player_priors import (
     annotate_consecutive_misses,
     build_prior_lookup_from_db,
@@ -112,6 +107,7 @@ def team_absence_deficit_for_serve(
     rosters,
     injuries,
     min_minutes: float,
+    value_key: str = "impact",
 ) -> float:
     """Build missing list + priors, then call the shared deficit function."""
     roster = rosters[rosters["TeamID"] == team_id]
@@ -122,14 +118,13 @@ def team_absence_deficit_for_serve(
     prior_lookup = annotate_consecutive_misses(
         conn, season_id, team_abbr, prior_lookup
     )
-    # Temporarily require the caller's minutes floor (10 for deficit, 25 for legacy)
     adjusted = {
         pid: {**p, "minutes": p["minutes"] if p["minutes"] >= min_minutes else 0.0}
         for pid, p in prior_lookup.items()
     }
     missing_ids = serving_missing_ids_from_injuries(injuries, roster, adjusted)
     return compute_team_absence_deficit(
-        missing_ids, prior_lookup, value_key="impact"
+        missing_ids, prior_lookup, value_key=value_key
     )
 
 
@@ -149,9 +144,12 @@ def main():
     model = joblib.load(model_path)
     with open(elo_path, encoding="utf-8") as f:
         elo = json.load(f)
+    value_key = "impact"
     if os.path.exists(cols_path):
         with open(cols_path, encoding="utf-8") as f:
-            feature_cols = json.load(f)["columns"]
+            meta = json.load(f)
+            feature_cols = meta["columns"]
+            value_key = meta.get("value_key", "impact")
     else:
         from nba_ml.features import ABSENCE_FEATURE_PLAYER, MATCHUP_CORE_FEATURES
 
@@ -191,40 +189,23 @@ def main():
         )
         hf = rolling_form_from_db(conn, home_abbr)
         af = rolling_form_from_db(conn, away_abbr)
-        # Both columns use compute_team_absence_deficit; only the minutes
-        # floor differs (legacy starters >=25, new rotation >=10). Out-only.
-        hm_def = team_absence_deficit_for_serve(
-            conn, season_id, home_id, home_abbr, rosters, injuries, 10.0
+        hm = team_absence_deficit_for_serve(
+            conn, season_id, home_id, home_abbr, rosters, injuries, 10.0, value_key
         )
-        am_def = team_absence_deficit_for_serve(
-            conn, season_id, away_id, away_abbr, rosters, injuries, 10.0
+        am = team_absence_deficit_for_serve(
+            conn, season_id, away_id, away_abbr, rosters, injuries, 10.0, value_key
         )
-        hm_st = team_absence_deficit_for_serve(
-            conn,
-            season_id,
-            home_id,
-            home_abbr,
-            rosters,
-            injuries,
-            float(STARTER_MIN_THRESHOLD),
-        )
-        am_st = team_absence_deficit_for_serve(
-            conn,
-            season_id,
-            away_id,
-            away_abbr,
-            rosters,
-            injuries,
-            float(STARTER_MIN_THRESHOLD),
-        )
+        deficit_diff = hm - am
 
         row = {
             "elo_diff": home_elo - away_elo,
             "rest_diff": hs["rest_days"] - as_["rest_days"],
             "b2b_diff": hs["is_back_to_back"] - as_["is_back_to_back"],
             "g7_diff": hs["games_last_7"] - as_["games_last_7"],
-            "missing_starter_diff": hm_st - am_st,
-            "player_deficit_diff": hm_def - am_def,
+            "player_deficit_diff": deficit_diff,
+            "player_deficit_eff_diff": deficit_diff,
+            "player_deficit_minutes_diff": deficit_diff,
+            "missing_starter_diff": deficit_diff,
             "form_pts_diff": hf["form_pts"] - af["form_pts"],
             "form_reb_diff": hf["form_reb"] - af["form_reb"],
             "form_ast_diff": hf["form_ast"] - af["form_ast"],
@@ -248,8 +229,8 @@ def main():
                 "Predicted_Winner": winner,
                 "Confidence": conf,
                 "Model": "logistic_matchup",
-                "Home_Player_Deficit": hm_def,
-                "Away_Player_Deficit": am_def,
+                "Home_Player_Deficit": hm,
+                "Away_Player_Deficit": am,
             }
         )
 

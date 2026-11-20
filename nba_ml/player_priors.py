@@ -2,7 +2,6 @@
 Pre-game player priors and missing-list builders.
 
 Deficit math lives in `nba_ml.features.compute_team_absence_deficit` only.
-This module builds (missing_ids, prior_lookup) for train or serve, then calls it.
 """
 
 from __future__ import annotations
@@ -23,60 +22,113 @@ from nba_ml.features import (
     blend_player_prior,
     compute_team_absence_deficit,
     player_impact,
+    player_impact_eff,
 )
 
-STAT_KEYS = ("pts", "reb", "ast", "stl", "blk", "tov", "minutes")
+# Keys stored as expanding sums / season-end averages
+STAT_KEYS = (
+    "pts",
+    "fgm",
+    "fga",
+    "ftm",
+    "fta",
+    "oreb",
+    "dreb",
+    "stl",
+    "ast",
+    "blk",
+    "pf",
+    "tov",
+    "reb",
+    "minutes",
+)
+
+# Box-score columns on player log rows (observe_game)
+LOG_COLS = [
+    "Player_ID",
+    "MIN_NUMERIC",
+    "PTS",
+    "FGM",
+    "FGA",
+    "FTM",
+    "FTA",
+    "OREB",
+    "DREB",
+    "STL",
+    "AST",
+    "BLK",
+    "PF",
+    "TOV",
+    "REB",
+]
 
 
 def _season_end_avgs(logs: pd.DataFrame) -> dict:
     g = logs.groupby(["SEASON_ID", "Player_ID"], as_index=False).agg(
         pts=("PTS", "mean"),
-        reb=("REB", "mean"),
-        ast=("AST", "mean"),
+        fgm=("FGM", "mean"),
+        fga=("FGA", "mean"),
+        ftm=("FTM", "mean"),
+        fta=("FTA", "mean"),
+        oreb=("OREB", "mean"),
+        dreb=("DREB", "mean"),
         stl=("STL", "mean"),
+        ast=("AST", "mean"),
         blk=("BLK", "mean"),
+        pf=("PF", "mean"),
         tov=("TOV", "mean"),
+        reb=("REB", "mean"),
         minutes=("MIN_NUMERIC", "mean"),
     )
     return {
-        (str(r.SEASON_ID), int(r.Player_ID)): {
-            "pts": float(r.pts),
-            "reb": float(r.reb),
-            "ast": float(r.ast),
-            "stl": float(r.stl),
-            "blk": float(r.blk),
-            "tov": float(r.tov),
-            "minutes": float(r.minutes),
-        }
+        (str(r.SEASON_ID), int(r.Player_ID)): {k: float(getattr(r, k)) for k in STAT_KEYS}
         for r in g.itertuples(index=False)
     }
 
 
+def _impacts_from_avgs(avgs: dict) -> tuple[float, float]:
+    counting = player_impact(
+        avgs["pts"], avgs["reb"], avgs["ast"], avgs["stl"], avgs["blk"], avgs["tov"]
+    )
+    eff = player_impact_eff(
+        avgs["pts"],
+        avgs["fgm"],
+        avgs["fga"],
+        avgs["ftm"],
+        avgs["fta"],
+        avgs["oreb"],
+        avgs["dreb"],
+        avgs["stl"],
+        avgs["ast"],
+        avgs["blk"],
+        avgs["pf"],
+        avgs["tov"],
+    )
+    return float(counting), float(eff)
+
+
 def _empty_prior(consecutive_misses: int) -> dict:
-    return {
-        "pts": 0.0,
-        "reb": 0.0,
-        "ast": 0.0,
-        "stl": 0.0,
-        "blk": 0.0,
-        "tov": 0.0,
-        "minutes": 0.0,
-        "impact": 0.0,
-        "gp": 0,
-        "consecutive_misses": int(consecutive_misses),
-    }
+    base = {k: 0.0 for k in STAT_KEYS}
+    base.update(
+        {
+            "impact": 0.0,
+            "impact_eff": 0.0,
+            "gp": 0,
+            "consecutive_misses": int(consecutive_misses),
+        }
+    )
+    return base
 
 
 def _prior_dict(st: dict | None, prev: dict | None, consecutive_misses: int) -> dict:
-    """Build a pre-game prior from current-season sums (played games only)."""
     if st is None or st["n"] <= 0:
         if prev is None:
             return _empty_prior(consecutive_misses)
+        counting, eff = _impacts_from_avgs(prev)
         return {
             **{k: float(prev[k]) for k in STAT_KEYS},
-            "impact": player_impact(
-                prev["pts"], prev["reb"], prev["ast"], prev["stl"], prev["blk"], prev["tov"]
-            ),
+            "impact": counting,
+            "impact_eff": eff,
             "gp": 0,
             "consecutive_misses": int(consecutive_misses),
         }
@@ -86,30 +138,17 @@ def _prior_dict(st: dict | None, prev: dict | None, consecutive_misses: int) -> 
     blended = {
         k: blend_player_prior(n, curr[k], prev[k] if prev else None) for k in STAT_KEYS
     }
+    counting, eff = _impacts_from_avgs(blended)
     return {
         **blended,
-        "impact": player_impact(
-            blended["pts"],
-            blended["reb"],
-            blended["ast"],
-            blended["stl"],
-            blended["blk"],
-            blended["tov"],
-        ),
+        "impact": counting,
+        "impact_eff": eff,
         "gp": n,
         "consecutive_misses": int(consecutive_misses),
     }
 
 
 class TeamAvailabilityTracker:
-    """
-    Chronological team-season tracker.
-
-    - Priors update only when a player plays (pre-injury averages preserved).
-    - consecutive_misses increments on each team game they miss; resets on play.
-    - Trades: membership starts at first appearance for that team this season.
-    """
-
     def __init__(self, season_end: dict):
         self.season_end = season_end
         self.curr_state = {}
@@ -157,37 +196,37 @@ class TeamAvailabilityTracker:
             st_key = (season, pid)
             st = self.curr_state.get(st_key)
             if st is None:
-                st = {
-                    "n": 0,
-                    "pts": 0.0,
-                    "reb": 0.0,
-                    "ast": 0.0,
-                    "stl": 0.0,
-                    "blk": 0.0,
-                    "tov": 0.0,
-                    "minutes": 0.0,
-                }
+                st = {"n": 0, **{k: 0.0 for k in STAT_KEYS}}
             st["n"] += 1
             st["pts"] += float(pref.PTS)
-            st["reb"] += float(pref.REB)
-            st["ast"] += float(pref.AST)
+            st["fgm"] += float(pref.FGM)
+            st["fga"] += float(pref.FGA)
+            st["ftm"] += float(pref.FTM)
+            st["fta"] += float(pref.FTA)
+            st["oreb"] += float(pref.OREB)
+            st["dreb"] += float(pref.DREB)
             st["stl"] += float(pref.STL)
+            st["ast"] += float(pref.AST)
             st["blk"] += float(pref.BLK)
+            st["pf"] += float(pref.PF)
             st["tov"] += float(pref.TOV)
+            st["reb"] += float(pref.REB)
             st["minutes"] += float(pref.MIN_NUMERIC)
             self.curr_state[st_key] = st
 
 
 def compute_team_game_player_deficits(
     logs: pd.DataFrame, team_games: pd.DataFrame
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Training path: impact deficit + minutes deficit via shared function.
-    Returns (impact_deficit, minutes_deficit) aligned to team_games rows.
-    """
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Returns (counting_impact, efficiency_impact, minutes) deficits."""
     logs = logs.copy()
     if "MIN_NUMERIC" not in logs.columns:
         logs["MIN_NUMERIC"] = pd.to_numeric(logs["MIN"], errors="coerce").fillna(0.0)
+    for col in ("FGM", "FGA", "FTM", "FTA", "OREB", "DREB", "STL", "BLK", "PF", "TOV", "REB"):
+        if col not in logs.columns:
+            logs[col] = 0.0
+        else:
+            logs[col] = pd.to_numeric(logs[col], errors="coerce").fillna(0.0)
 
     season_end = _season_end_avgs(logs)
     tracker = TeamAvailabilityTracker(season_end)
@@ -197,47 +236,41 @@ def compute_team_game_player_deficits(
         for key, group in logs.groupby(["Game_ID", "TEAM_ABBR"])
     }
     logs_by_gt = {
-        key: group[
-            ["Player_ID", "MIN_NUMERIC", "PTS", "REB", "AST", "STL", "BLK", "TOV"]
-        ]
+        key: group[LOG_COLS]
         for key, group in logs.groupby(["Game_ID", "TEAM_ABBR"])
     }
 
     ordered = team_games.sort_values(["game_date", "Game_ID", "TEAM_ABBR"])
-    impact_vals = {}
-    minutes_vals = {}
+    impact_vals, eff_vals, minutes_vals = {}, {}, {}
 
     for row in ordered.itertuples():
         key = (row.Game_ID, row.TEAM_ABBR)
-        season = str(row.season_id)
-        team = row.TEAM_ABBR
+        season, team = str(row.season_id), row.TEAM_ABBR
         played = played_map.get(key, set())
-
         prior_lookup = tracker.prior_lookup(season, team)
         missing_ids = tracker.training_missing_ids(season, team, played)
         impact_vals[key] = compute_team_absence_deficit(
             missing_ids, prior_lookup, value_key="impact"
         )
+        eff_vals[key] = compute_team_absence_deficit(
+            missing_ids, prior_lookup, value_key="impact_eff"
+        )
         minutes_vals[key] = compute_team_absence_deficit(
             missing_ids, prior_lookup, value_key="minutes"
         )
-
         tracker.observe_game(season, team, logs_by_gt.get(key), played)
 
-    impact = np.array(
-        [impact_vals.get((r.Game_ID, r.TEAM_ABBR), 0.0) for r in team_games.itertuples()],
-        dtype=np.float64,
-    )
-    minutes = np.array(
-        [minutes_vals.get((r.Game_ID, r.TEAM_ABBR), 0.0) for r in team_games.itertuples()],
-        dtype=np.float64,
-    )
-    return impact, minutes
+    def align(d):
+        return np.array(
+            [d.get((r.Game_ID, r.TEAM_ABBR), 0.0) for r in team_games.itertuples()],
+            dtype=np.float64,
+        )
+
+    return align(impact_vals), align(eff_vals), align(minutes_vals)
 
 
-# Back-compat alias
 def compute_team_game_player_deficit(logs, team_games):
-    impact, _ = compute_team_game_player_deficits(logs, team_games)
+    impact, _, _ = compute_team_game_player_deficits(logs, team_games)
     return impact
 
 
@@ -286,8 +319,11 @@ def build_prior_lookup_from_db(conn, season_id: str, player_ids: list[int]) -> d
     curr = pd.read_sql(
         f"""
         SELECT Player_ID, COUNT(*) as n,
-               SUM(PTS) as pts, SUM(REB) as reb, SUM(AST) as ast,
-               SUM(STL) as stl, SUM(BLK) as blk, SUM(TOV) as tov,
+               SUM(PTS) as pts, SUM(FGM) as fgm, SUM(FGA) as fga,
+               SUM(FTM) as ftm, SUM(FTA) as fta,
+               SUM(OREB) as oreb, SUM(DREB) as dreb,
+               SUM(STL) as stl, SUM(AST) as ast, SUM(BLK) as blk,
+               SUM(PF) as pf, SUM(TOV) as tov, SUM(REB) as reb,
                SUM(CAST(MIN AS FLOAT)) as minutes
         FROM player_logs
         WHERE SEASON_ID = ? AND Player_ID IN ({ids})
@@ -299,8 +335,11 @@ def build_prior_lookup_from_db(conn, season_id: str, player_ids: list[int]) -> d
     prev = pd.read_sql(
         f"""
         SELECT Player_ID,
-               AVG(PTS) as pts, AVG(REB) as reb, AVG(AST) as ast,
-               AVG(STL) as stl, AVG(BLK) as blk, AVG(TOV) as tov,
+               AVG(PTS) as pts, AVG(FGM) as fgm, AVG(FGA) as fga,
+               AVG(FTM) as ftm, AVG(FTA) as fta,
+               AVG(OREB) as oreb, AVG(DREB) as dreb,
+               AVG(STL) as stl, AVG(AST) as ast, AVG(BLK) as blk,
+               AVG(PF) as pf, AVG(TOV) as tov, AVG(REB) as reb,
                AVG(CAST(MIN AS FLOAT)) as minutes
         FROM player_logs
         WHERE SEASON_ID = ? AND Player_ID IN ({ids})
@@ -320,7 +359,6 @@ def build_prior_lookup_from_db(conn, season_id: str, player_ids: list[int]) -> d
         }
         for r in curr.itertuples(index=False)
     }
-
     return {
         int(pid): _prior_dict(curr_map.get(int(pid)), prev_map.get(int(pid)), 0)
         for pid in player_ids

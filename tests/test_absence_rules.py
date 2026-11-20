@@ -16,6 +16,7 @@ from nba_ml.features import (
     blend_player_prior,
     compute_team_absence_deficit,
     player_impact,
+    player_impact_eff,
 )
 from nba_ml.player_priors import (
     TeamAvailabilityTracker,
@@ -74,10 +75,17 @@ def test_changing_game_i_result_does_not_change_game_i_deficit():
             "GAME_DATE_DT": pd.Timestamp("2024-01-01"),
             "MIN_NUMERIC": 30.0,
             "PTS": 20.0,
+            "FGM": 8.0,
+            "FGA": 15.0,
+            "FTM": 2.0,
+            "FTA": 2.0,
+            "OREB": 1.0,
+            "DREB": 4.0,
             "REB": 5.0,
             "AST": 5.0,
             "STL": 1.0,
             "BLK": 0.0,
+            "PF": 2.0,
             "TOV": 2.0,
             "WL": "W",
         },
@@ -89,10 +97,17 @@ def test_changing_game_i_result_does_not_change_game_i_deficit():
             "GAME_DATE_DT": pd.Timestamp("2024-01-01"),
             "MIN_NUMERIC": 20.0,
             "PTS": 8.0,
+            "FGM": 3.0,
+            "FGA": 7.0,
+            "FTM": 1.0,
+            "FTA": 2.0,
+            "OREB": 0.0,
+            "DREB": 2.0,
             "REB": 2.0,
             "AST": 2.0,
             "STL": 0.0,
             "BLK": 0.0,
+            "PF": 1.0,
             "TOV": 1.0,
             "WL": "W",
         },
@@ -104,10 +119,17 @@ def test_changing_game_i_result_does_not_change_game_i_deficit():
             "GAME_DATE_DT": pd.Timestamp("2024-01-03"),
             "MIN_NUMERIC": 28.0,
             "PTS": 10.0,
+            "FGM": 4.0,
+            "FGA": 9.0,
+            "FTM": 1.0,
+            "FTA": 1.0,
+            "OREB": 1.0,
+            "DREB": 2.0,
             "REB": 3.0,
             "AST": 3.0,
             "STL": 0.0,
             "BLK": 0.0,
+            "PF": 2.0,
             "TOV": 1.0,
             "WL": "L",
         },
@@ -117,7 +139,23 @@ def test_changing_game_i_result_does_not_change_game_i_deficit():
     def deficit_for_g2(log_df):
         tracker = TeamAvailabilityTracker({})
         g1 = log_df[log_df["Game_ID"] == "g1"][
-            ["Player_ID", "MIN_NUMERIC", "PTS", "REB", "AST", "STL", "BLK", "TOV"]
+            [
+                "Player_ID",
+                "MIN_NUMERIC",
+                "PTS",
+                "FGM",
+                "FGA",
+                "FTM",
+                "FTA",
+                "OREB",
+                "DREB",
+                "REB",
+                "AST",
+                "STL",
+                "BLK",
+                "PF",
+                "TOV",
+            ]
         ]
         tracker.observe_game("22023", "AAA", g1, set(g1["Player_ID"].astype(int)))
         played2 = set(log_df[log_df["Game_ID"] == "g2"]["Player_ID"].astype(int))
@@ -145,10 +183,17 @@ def test_returning_player_keeps_pre_injury_average():
                 "Player_ID": 1,
                 "MIN_NUMERIC": 30.0,
                 "PTS": 24.0,
+                "FGM": 9.0,
+                "FGA": 18.0,
+                "FTM": 4.0,
+                "FTA": 5.0,
+                "OREB": 1.0,
+                "DREB": 5.0,
                 "REB": 6.0,
                 "AST": 6.0,
                 "STL": 1.0,
                 "BLK": 1.0,
+                "PF": 2.0,
                 "TOV": 2.0,
             }
         ]
@@ -159,6 +204,7 @@ def test_returning_player_keeps_pre_injury_average():
     prior = tracker.prior_lookup("22023", "AAA")[1]
     assert prior["pts"] == 24.0
     assert prior["consecutive_misses"] == 3
+    assert "impact_eff" in prior
 
 
 def test_star_out_deficit_much_larger_than_bench():
@@ -218,3 +264,24 @@ def test_rest_days_cap_is_seven():
 def test_impact_formula_weights():
     # PTS + 1.5*AST + REB + STL + BLK - TOV
     assert player_impact(10, 4, 2, 1, 1, 3) == 10 + 3 + 4 + 1 + 1 - 3
+
+
+def test_efficiency_impact_formula():
+    # PTS + 0.4*FGM - 0.7*FGA - 0.4*(FTA-FTM) + 0.7*OREB + 0.3*DREB
+    # + STL + 0.7*AST + 0.7*BLK - 0.4*PF - TOV
+    got = player_impact_eff(
+        pts=20, fgm=8, fga=16, ftm=3, fta=4, oreb=2, dreb=6, stl=1, ast=5, blk=1, pf=2, tov=3
+    )
+    expected = (
+        20 + 0.4 * 8 - 0.7 * 16 - 0.4 * (4 - 3) + 0.7 * 2 + 0.3 * 6 + 1 + 0.7 * 5 + 0.7 * 1 - 0.4 * 2 - 3
+    )
+    assert abs(got - expected) < 1e-9
+
+
+def test_efficiency_penalizes_empty_calories_vs_counting():
+    """Same PTS, worse FG% => lower efficiency impact, counting unchanged on PTS/REB/AST."""
+    efficient = player_impact_eff(20, 9, 14, 2, 2, 1, 4, 1, 4, 0, 2, 2)
+    chucker = player_impact_eff(20, 7, 20, 2, 4, 1, 4, 1, 4, 0, 2, 2)
+    assert efficient > chucker
+    # counting ignores FGA
+    assert player_impact(20, 5, 4, 1, 0, 2) == player_impact(20, 5, 4, 1, 0, 2)

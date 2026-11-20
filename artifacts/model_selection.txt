@@ -1,8 +1,7 @@
-best_model=logistic_impact_sigmoid
-selection_split=validation
-test_log_loss=0.596765
-test_brier=0.205784
-test_accuracy=0.675102
-bootstrap_delta_mean=-0.001795
-bootstrap_ci95=[-0.003178, -0.000341]
+best_model=logistic_efficiency_sigmoid
+value_key=impact_eff
+test_log_loss=0.595859
+test_brier=0.205420
+test_accuracy=0.678367
+boot_eff_minus_counting=-0.000574 [-0.001199, 0.000050]
 frozen_eval_season=2025-26

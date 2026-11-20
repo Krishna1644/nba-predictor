@@ -1,9 +1,8 @@
 {
   "selection_split": "validation",
   "selection_metric": "log_loss",
-  "production_absence_family": "player_deficit",
-  "selected_absence_feature": "impact",
-  "selection_reason": "val_logloss_winner",
+  "selected_absence_feature": "efficiency",
+  "value_key": "impact_eff",
   "selected_columns": [
     "elo_diff",
     "rest_diff",
@@ -13,47 +12,63 @@
     "form_reb_diff",
     "form_ast_diff",
     "form_pm_diff",
-    "player_deficit_diff"
+    "player_deficit_eff_diff"
   ],
   "calibration_selected": "sigmoid",
   "calibration_val": [
     {
       "method": "none",
-      "log_loss": 0.6207109911188324,
-      "brier": 0.21591163219303483,
-      "accuracy": 0.645043398812243,
-      "auc": 0.7036608495158759
+      "log_loss": 0.6201412483187785,
+      "brier": 0.2156578663386742,
+      "accuracy": 0.6441297396071265,
+      "auc": 0.7044823727484179
     },
     {
       "method": "isotonic",
-      "log_loss": 0.6274458140368279,
-      "brier": 0.21619021618602666,
-      "accuracy": 0.6441297396071265,
-      "auc": 0.7035560461405312
+      "log_loss": 0.6400768417667494,
+      "brier": 0.21576617030740367,
+      "accuracy": 0.646870717222476,
+      "auc": 0.7049260967166118
     },
     {
       "method": "sigmoid",
-      "log_loss": 0.6207059903694288,
-      "brier": 0.21591727297349614,
-      "accuracy": 0.6464138876199178,
-      "auc": 0.7036693014009845
+      "log_loss": 0.6201179417116307,
+      "brier": 0.2156568938097474,
+      "accuracy": 0.6441297396071265,
+      "auc": 0.7045220966084275
     }
   ],
-  "bootstrap_val_logloss_delta_impact_minus_minutes": {
-    "delta_mean": -0.001795203076305593,
-    "ci95_low": -0.0031784795934587996,
-    "ci95_high": -0.00034119147584450477,
+  "bootstrap_val_logloss_delta_efficiency_minus_counting": {
+    "delta_mean": -0.0005740192440205443,
+    "ci95_low": -0.0011990289279510513,
+    "ci95_high": 4.9592267337503184e-05,
     "n_boot": 1000,
-    "definition": "delta = logloss(impact) - logloss(minutes); negative => impact better"
+    "definition": "delta = logloss(efficiency) - logloss(counting); negative => efficiency better"
+  },
+  "bootstrap_val_logloss_delta_counting_minus_minutes": {
+    "delta_mean": -0.0018045515199131862,
+    "ci95_low": -0.0032261941734387984,
+    "ci95_high": -0.0003809789536524418,
+    "n_boot": 1000,
+    "definition": "delta = logloss(counting) - logloss(minutes); negative => counting better"
   },
   "validation_metrics": [
     {
-      "model": "logistic_impact/val",
+      "model": "logistic_counting/val",
       "n": 2189,
       "accuracy": 0.645043398812243,
       "log_loss": 0.6207109911188324,
       "brier": 0.21591163219303483,
       "auc": 0.7036608495158759,
+      "base_rate": 0.5555047967108269
+    },
+    {
+      "model": "logistic_efficiency/val",
+      "n": 2189,
+      "accuracy": 0.6441297396071265,
+      "log_loss": 0.6201412483187785,
+      "brier": 0.2156578663386742,
+      "auc": 0.7044823727484179,
       "base_rate": 0.5555047967108269
     },
     {
@@ -68,11 +83,11 @@
   ],
   "report_test_season": "2024-25",
   "frozen_season": "2025-26",
-  "impact_formula": "PTS + 1.5*AST + REB + STL + BLK - TOV",
+  "counting_formula": "PTS + 1.5*AST + REB + STL + BLK - TOV",
+  "efficiency_formula": "PTS + 0.4*FGM - 0.7*FGA - 0.4*(FTA-FTM) + 0.7*OREB + 0.3*DREB + STL + 0.7*AST + 0.7*BLK - 0.4*PF - TOV",
   "replacement_adjustment": "skipped_no_reliable_position_data",
   "guards": {
     "class_weight_kwarg_present": false,
     "home_court_in_core_features": false
-  },
-  "notes": "Legacy missing_starter not in production candidates. If bootstrap CI for impact-minutes includes 0, ship impact for train/serve consistency. Replacement-at-position skipped. 2025-26 not evaluated."
+  }
 }

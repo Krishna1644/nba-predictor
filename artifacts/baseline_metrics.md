@@ -1,7 +1,9 @@
 | model | n | accuracy | log_loss | brier | auc | base_rate |
 | --- | --- | --- | --- | --- | --- | --- |
 | elo_only/test_2024-25 | 1225 | 0.642 | 0.6280 | 0.2193 | 0.715 | 0.544 |
-| logistic_impact_sigmoid/test_2024-25 | 1225 | 0.675 | 0.5968 | 0.2058 | 0.738 | 0.544 |
+| logistic_efficiency_sigmoid/test_2024-25 | 1225 | 0.678 | 0.5959 | 0.2054 | 0.739 | 0.544 |
+| logistic_counting/test_2024-25_not_selected | 1225 | 0.675 | 0.5967 | 0.2058 | 0.738 | 0.544 |
 | logistic_minutes/test_2024-25_not_selected | 1225 | 0.667 | 0.6002 | 0.2072 | 0.735 | 0.544 |
-| logistic_impact/val | 2189 | 0.645 | 0.6207 | 0.2159 | 0.704 | 0.556 |
+| logistic_counting/val | 2189 | 0.645 | 0.6207 | 0.2159 | 0.704 | 0.556 |
+| logistic_efficiency/val | 2189 | 0.644 | 0.6201 | 0.2157 | 0.704 | 0.556 |
 | logistic_minutes/val | 2189 | 0.649 | 0.6225 | 0.2167 | 0.701 | 0.556 |
