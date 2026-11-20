@@ -361,8 +361,8 @@ def main():
                 "Home_Win_Prob": home_prob,
                 "Away_Win_Prob": away_prob,
                 "Predicted_Winner": winner,
-                "Confidence": conf,
                 "Win_Probability": conf,
+                "Confidence": conf,  # alias for older history graders
                 "Model": f"logistic_matchup_{calib}",
                 "Home_Player_Deficit": hm,
                 "Away_Player_Deficit": am,

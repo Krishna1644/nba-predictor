@@ -66,6 +66,15 @@ def _norm_name(name) -> str:
     ).lower().strip()
 
 
+def _dedupe_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Streamlit/pyarrow rejects frames with duplicate column labels."""
+    if df is None or df.empty:
+        return df
+    if not df.columns.duplicated().any():
+        return df
+    return df.loc[:, ~df.columns.duplicated()].copy()
+
+
 def logo_url_for_team_name(name: str) -> str | None:
     # Reverse lookup from full name
     for tid, full in __import__("nba_ml.team_ids", fromlist=["NBA_ID_TO_NAME"]).NBA_ID_TO_NAME.items():
@@ -124,21 +133,23 @@ def load_data():
     if not preds_path or not games_path:
         return None
 
-    preds = pd.read_csv(preds_path)
-    games = pd.read_csv(games_path)
+    preds = _dedupe_columns(pd.read_csv(preds_path))
+    games = _dedupe_columns(pd.read_csv(games_path))
     if "GAME_ID" in preds.columns:
         preds["GAME_ID"] = _norm_game_id(preds["GAME_ID"])
     if "GAME_ID" in games.columns:
         games["GAME_ID"] = _norm_game_id(games["GAME_ID"])
-    if "Win_Probability" not in preds.columns and "Confidence" in preds.columns:
-        preds["Win_Probability"] = preds["Confidence"]
+    if "Confidence" in preds.columns:
+        if "Win_Probability" not in preds.columns:
+            preds["Win_Probability"] = preds["Confidence"]
+        preds = preds.drop(columns=["Confidence"])
 
     def _csv(*names):
         p = _first_existing(*names)
         if not p:
             return pd.DataFrame()
         try:
-            return pd.read_csv(p)
+            return _dedupe_columns(pd.read_csv(p))
         except Exception:
             return pd.DataFrame()
 
@@ -341,8 +352,17 @@ with tab_picks:
                             else:
                                 ti = pd.DataFrame()
                             if not ti.empty:
-                                cols = [c for c in ("Player", "Injury", "Status") if c in ti.columns]
-                                st.dataframe(ti[cols], hide_index=True, use_container_width=True)
+                                ti = _dedupe_columns(ti)
+                                cols = [
+                                    c
+                                    for c in ("Player", "Injury", "Status")
+                                    if c in ti.columns
+                                ]
+                                st.dataframe(
+                                    ti.loc[:, cols],
+                                    hide_index=True,
+                                    use_container_width=True,
+                                )
                             else:
                                 st.caption("No listed injuries for this team.")
                 except Exception as e:
@@ -350,28 +370,31 @@ with tab_picks:
 
     st.divider()
     st.markdown("#### All projections")
-    show = preds_df.copy()
-    rename = {"Confidence": "Win_Probability"}
-    show = show.rename(columns={k: v for k, v in rename.items() if k in show.columns})
+    show = _dedupe_columns(preds_df.copy())
+    if "Confidence" in show.columns and "Win_Probability" in show.columns:
+        show = show.drop(columns=["Confidence"])
+    elif "Confidence" in show.columns:
+        show = show.rename(columns={"Confidence": "Win_Probability"})
     for c in ("Home_Win_Prob", "Away_Win_Prob", "Win_Probability"):
         if c in show.columns:
-            show[c] = show[c].map(lambda x: f"{float(x):.1%}")
-    keep = [
-        c
-        for c in (
-            "Away_Team",
-            "Home_Team",
-            "Away_Win_Prob",
-            "Home_Win_Prob",
-            "Predicted_Winner",
-            "Win_Probability",
-            "Home_Player_Deficit",
-            "Away_Player_Deficit",
-            "Reason",
-        )
-        if c in show.columns
-    ]
-    st.dataframe(show[keep], hide_index=True, use_container_width=True)
+            show[c] = pd.to_numeric(show[c], errors="coerce").map(
+                lambda x: f"{float(x):.1%}" if pd.notna(x) else ""
+            )
+    keep = []
+    for c in (
+        "Away_Team",
+        "Home_Team",
+        "Away_Win_Prob",
+        "Home_Win_Prob",
+        "Predicted_Winner",
+        "Win_Probability",
+        "Home_Player_Deficit",
+        "Away_Player_Deficit",
+        "Reason",
+    ):
+        if c in show.columns and c not in keep:
+            keep.append(c)
+    st.dataframe(show.loc[:, keep], hide_index=True, use_container_width=True)
     st.download_button(
         "Download CSV",
         data=preds_df.to_csv(index=False).encode("utf-8"),
@@ -391,7 +414,8 @@ with tab_season:
             if block.empty:
                 continue
             st.markdown(f"**{conf}**")
-            view = block[["Team", "W", "L", "Win%", "Elo"]].copy()
+            cols = [c for c in ("Team", "W", "L", "Win%", "Elo") if c in block.columns]
+            view = _dedupe_columns(block.loc[:, cols].copy())
             st.dataframe(
                 view.style.format({"Win%": "{:.1%}", "Elo": "{:.0f}"}),
                 hide_index=True,
