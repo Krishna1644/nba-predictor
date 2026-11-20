@@ -150,24 +150,32 @@ def build_team_sequence(team_id, rosters_df, conn, injured_names, schedule_ctx, 
     if len(recent_game_ids) < LOOKBACK:
         return None
     
-    # Leak-safe-ish starter estimate: mean minutes from prior games only
-    # (exclude nothing future; all DB rows are historical relative to tonight).
-    # Prefer recent form: last 15 appearances per player.
-    recent_mins = (
-        player_logs.sort_values('GAME_DATE_DT')
-        .groupby('Player_ID')['MIN_NUMERIC']
-        .apply(lambda s: s.tail(15).mean())
+    # Tonight absence deficit via the SAME shared function as training/logistic.
+    # Missing list = Status=="Out" rotation players; value = pre-game blended impact.
+    from nba_ml.features import compute_team_absence_deficit
+    from nba_ml.player_priors import (
+        annotate_consecutive_misses,
+        build_prior_lookup_from_db,
+        serving_missing_ids_from_injuries,
     )
-    starters = recent_mins[recent_mins >= STARTER_MIN_THRESHOLD]
 
-    # Tonight injury impact — actually injected into the sequence below
-    roster_names = rosters_df[rosters_df['TeamID'] == team_id][['PLAYER_ID', 'PLAYER']]
-    tonight_missing_min = 0.0
-    for _, row in roster_names.iterrows():
-        pid = row['PLAYER_ID']
-        pname = normalize_name(row['PLAYER'])
-        if pname in injured_names and pid in starters.index:
-            tonight_missing_min += float(starters[pid])
+    roster_names = rosters_df[rosters_df['TeamID'] == team_id]
+    try:
+        injuries_df = pd.read_csv('injuries.csv')
+    except Exception:
+        injuries_df = pd.DataFrame()
+
+    pids = [int(x) for x in roster_names['PLAYER_ID'].tolist()] if not roster_names.empty else []
+    season_id = str(player_logs['SEASON_ID'].iloc[0]) if not player_logs.empty else '22026'
+    team_abbr = (
+        player_logs['MATCHUP'].iloc[0].split(' ')[0].strip()
+        if not player_logs.empty else ''
+    )
+    prior_lookup = build_prior_lookup_from_db(conn, season_id, pids)
+    if team_abbr:
+        prior_lookup = annotate_consecutive_misses(conn, season_id, team_abbr, prior_lookup)
+    missing_ids = serving_missing_ids_from_injuries(injuries_df, roster_names, prior_lookup)
+    tonight_missing_min = compute_team_absence_deficit(missing_ids, prior_lookup)
 
     tonight_schedule = schedule_ctx.get(team_id, {})
     
@@ -227,13 +235,16 @@ def build_team_sequence(team_id, rosters_df, conn, injured_names, schedule_ctx, 
         g7 = sum(1 for d in dates_list[:game_date_idx] if pd.Timestamp(d) >= seven_ago)
         row['games_last_7'] = g7
         
-        # Historical missing starters from recent-form starter list
-        played_ids = set(game_logs['Player_ID'].unique())
-        hist_missing = 0.0
-        for pid, avg_min in starters.items():
-            if pid not in played_ids:
-                hist_missing += float(avg_min)
-        row['missing_starter_minutes'] = hist_missing
+        # Historical absence: same shared deficit fn; missing = rotation DNPs
+        played_ids = {int(x) for x in game_logs['Player_ID'].unique()}
+        hist_missing_ids = [
+            pid
+            for pid, pr in prior_lookup.items()
+            if pid not in played_ids and pr.get('minutes', 0) >= 10
+        ]
+        row['missing_starter_minutes'] = compute_team_absence_deficit(
+            hist_missing_ids, prior_lookup
+        )
         
         # Elo and opponent strength context
         # Get team abbreviation for context lookups

@@ -14,6 +14,7 @@ import json
 import os
 from collections import defaultdict
 from datetime import timedelta
+from typing import Iterable
 
 import joblib
 import numpy as np
@@ -55,24 +56,107 @@ FEATURE_COLUMNS = [
 
 assert len(FEATURE_COLUMNS) == 24
 
-# Pre-game matchup features for logistic baseline (home-centric).
-MATCHUP_FEATURE_COLUMNS = [
+# Core matchup features (no constant home_court — home edge is in Elo HA / intercept).
+MATCHUP_CORE_FEATURES = [
     "elo_diff",
     "rest_diff",
     "b2b_diff",
     "g7_diff",
-    "missing_starter_diff",
     "form_pts_diff",
     "form_reb_diff",
     "form_ast_diff",
     "form_pm_diff",
-    "home_court",
 ]
 
-# Seasons: train through 2023-24, hold out 2024-25, reserve 2025-26 for live.
+# Absence feature variants — pick impact vs minutes on validation only.
+# Legacy missing_starter_diff is retained in exports for analysis, not production.
+ABSENCE_FEATURE_STARTER = "missing_starter_diff"
+ABSENCE_FEATURE_PLAYER = "player_deficit_diff"  # impact composite
+ABSENCE_FEATURE_MINUTES = "player_deficit_minutes_diff"  # minutes comparison
+
+MATCHUP_FEATURE_COLUMNS = MATCHUP_CORE_FEATURES + [
+    ABSENCE_FEATURE_PLAYER,
+    ABSENCE_FEATURE_MINUTES,
+    ABSENCE_FEATURE_STARTER,
+]
+
+# Seasons:
+#   train/val  <= 2023-24
+#   report test = 2024-25 (metrics only; never used for selection)
+#   frozen eval = 2025-26 (do not score until deliberate second eval)
+#   live fetch  = 2026-27
 TRAIN_SEASON_MAX = "22023"  # 2023-24
-TEST_SEASON = "22024"  # 2024-25
-LIVE_SEASON = "22025"  # 2025-26
+TEST_SEASON = "22024"  # 2024-25 report
+FROZEN_EVAL_SEASON = "22025"  # 2025-26 untouched
+LIVE_SEASON = "22026"  # 2026-27
+REST_DAYS_CAP = 7
+
+# Absence / rotation rules (shared train + serve)
+ROTATION_MIN_THRESHOLD = 10.0
+MAX_CONSECUTIVE_MISSES = 10  # 10+ straight team games missed → exclude
+PRIOR_STRENGTH = 10  # weight_current = gp / (gp + 10)
+
+
+def compute_team_absence_deficit(
+    missing_player_ids: Iterable,
+    prior_lookup: dict,
+    value_key: str = "impact",
+) -> float:
+    """
+    SINGLE shared team-deficit function for training and serving.
+
+    Sums pre-game blended `value_key` for each missing player id, excluding
+    anyone who has already missed MAX_CONSECUTIVE_MISSES+ team games in a row.
+
+    Default value_key='impact' (PTS + 1.5*AST + REB + STL + BLK - TOV).
+    Use value_key='minutes' for the minutes-based comparison column.
+
+    Callers build `missing_player_ids` (train: DNP rotation; serve: Status==Out)
+    and `prior_lookup` (pre-game only). This function does not branch on path.
+
+    Note: no replacement-at-position adjustment — reliable position data is not
+    in player_logs; net hole is missing player value only.
+    """
+    total = 0.0
+    for pid in missing_player_ids:
+        key = int(pid) if not isinstance(pid, int) else pid
+        prior = prior_lookup.get(key) or prior_lookup.get(pid)
+        if not prior:
+            continue
+        if int(prior.get("consecutive_misses", 0)) >= MAX_CONSECUTIVE_MISSES:
+            continue
+        total += float(prior.get(value_key, 0.0))
+    return float(total)
+
+
+def blend_player_prior(gp_current: int, curr_avg: float, prev_avg: float | None) -> float:
+    """weight_current = gp / (gp + 10); falls back to prev when gp==0."""
+    n = max(int(gp_current), 0)
+    w = n / (n + PRIOR_STRENGTH)
+    if prev_avg is None or (isinstance(prev_avg, float) and np.isnan(prev_avg)):
+        return float(curr_avg) if n > 0 else 0.0
+    if n <= 0:
+        return float(prev_avg)
+    return float(w * curr_avg + (1.0 - w) * prev_avg)
+
+
+def player_impact(
+    pts: float,
+    reb: float,
+    ast: float,
+    stl: float = 0.0,
+    blk: float = 0.0,
+    tov: float = 0.0,
+) -> float:
+    """Pre-game per-game composite: PTS + 1.5*AST + REB + STL + BLK - TOV."""
+    return (
+        float(pts)
+        + 1.5 * float(ast)
+        + float(reb)
+        + float(stl)
+        + float(blk)
+        - float(tov)
+    )
 
 
 def compute_advanced_metrics(df: pd.DataFrame) -> pd.DataFrame:
@@ -312,17 +396,24 @@ def build_team_game_features(player_logs: pd.DataFrame, models_dir: str = MODELS
     team_games = team_games[team_games["TEAM_ABBR"] != team_games["OPP_ABBR"]].copy()
     team_games["mov"] = team_games["team_pts"] - team_games["opponent_pts"]
 
-    print("  Computing leak-safe missing_starter_minutes...")
+    print("  Computing leak-safe missing_starter_minutes (legacy absence feature)...")
     team_games["missing_starter_minutes"] = compute_missing_starter_minutes(
         logs, team_games
     )
+
+    print("  Computing player_deficit impact + minutes (shared deficit fn)...")
+    from nba_ml.player_priors import compute_team_game_player_deficits
+
+    impact, minutes_def = compute_team_game_player_deficits(logs, team_games)
+    team_games["player_deficit"] = impact
+    team_games["player_deficit_minutes"] = minutes_def
 
     print("  Computing schedule context...")
     team_games = team_games.sort_values(["TEAM_ABBR", "game_date"]).reset_index(drop=True)
     team_games["prev_game_date"] = team_games.groupby("TEAM_ABBR")["game_date"].shift(1)
     team_games["rest_days"] = (
         team_games["game_date"] - team_games["prev_game_date"]
-    ).dt.days.fillna(3).astype(int)
+    ).dt.days.fillna(3).astype(int).clip(upper=REST_DAYS_CAP)
     team_games["is_back_to_back"] = (team_games["rest_days"] == 1).astype(int)
 
     games_last_7 = np.zeros(len(team_games), dtype=int)
@@ -360,25 +451,26 @@ def build_team_game_features(player_logs: pd.DataFrame, models_dir: str = MODELS
 
 
 def build_matchup_frame(team_games: pd.DataFrame) -> pd.DataFrame:
-    """One row per game; features are home-minus-away / home-centric pre-game."""
-    home = team_games[team_games["is_home"] == 1][
-        [
-            "Game_ID",
-            "TEAM_ABBR",
-            "season_id",
-            "game_date",
-            "win",
-            "team_elo",
-            "rest_days",
-            "is_back_to_back",
-            "games_last_7",
-            "missing_starter_minutes",
-            "form_pts",
-            "form_reb",
-            "form_ast",
-            "form_pm",
-        ]
-    ].rename(
+    """One row per game; features are home-minus-away pre-game diffs."""
+    cols = [
+        "Game_ID",
+        "TEAM_ABBR",
+        "season_id",
+        "game_date",
+        "win",
+        "team_elo",
+        "rest_days",
+        "is_back_to_back",
+        "games_last_7",
+        "missing_starter_minutes",
+        "player_deficit",
+        "player_deficit_minutes",
+        "form_pts",
+        "form_reb",
+        "form_ast",
+        "form_pm",
+    ]
+    home = team_games[team_games["is_home"] == 1][cols].rename(
         columns={
             "TEAM_ABBR": "home_team",
             "win": "home_win",
@@ -387,27 +479,16 @@ def build_matchup_frame(team_games: pd.DataFrame) -> pd.DataFrame:
             "is_back_to_back": "home_b2b",
             "games_last_7": "home_g7",
             "missing_starter_minutes": "home_missing_starter_min",
+            "player_deficit": "home_player_deficit",
+            "player_deficit_minutes": "home_player_deficit_minutes",
             "form_pts": "home_form_pts",
             "form_reb": "home_form_reb",
             "form_ast": "home_form_ast",
             "form_pm": "home_form_pm",
         }
     )
-    away = team_games[team_games["is_home"] == 0][
-        [
-            "Game_ID",
-            "TEAM_ABBR",
-            "team_elo",
-            "rest_days",
-            "is_back_to_back",
-            "games_last_7",
-            "missing_starter_minutes",
-            "form_pts",
-            "form_reb",
-            "form_ast",
-            "form_pm",
-        ]
-    ].rename(
+    away_cols = [c for c in cols if c not in ("season_id", "game_date", "win")]
+    away = team_games[team_games["is_home"] == 0][away_cols].rename(
         columns={
             "TEAM_ABBR": "away_team",
             "team_elo": "away_elo",
@@ -415,6 +496,8 @@ def build_matchup_frame(team_games: pd.DataFrame) -> pd.DataFrame:
             "is_back_to_back": "away_b2b",
             "games_last_7": "away_g7",
             "missing_starter_minutes": "away_missing_starter_min",
+            "player_deficit": "away_player_deficit",
+            "player_deficit_minutes": "away_player_deficit_minutes",
             "form_pts": "away_form_pts",
             "form_reb": "away_form_reb",
             "form_ast": "away_form_ast",
@@ -430,11 +513,14 @@ def build_matchup_frame(team_games: pd.DataFrame) -> pd.DataFrame:
     m["missing_starter_diff"] = (
         m["home_missing_starter_min"] - m["away_missing_starter_min"]
     )
+    m["player_deficit_diff"] = m["home_player_deficit"] - m["away_player_deficit"]
+    m["player_deficit_minutes_diff"] = (
+        m["home_player_deficit_minutes"] - m["away_player_deficit_minutes"]
+    )
     m["form_pts_diff"] = m["home_form_pts"] - m["away_form_pts"]
     m["form_reb_diff"] = m["home_form_reb"] - m["away_form_reb"]
     m["form_ast_diff"] = m["home_form_ast"] - m["away_form_ast"]
     m["form_pm_diff"] = m["home_form_pm"] - m["away_form_pm"]
-    m["home_court"] = 1
     return m.sort_values("game_date").reset_index(drop=True)
 
 

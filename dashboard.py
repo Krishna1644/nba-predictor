@@ -343,7 +343,7 @@ See `artifacts/holdout_metrics.md` and `README.md`.
 ```
 Features → StandardScaler → LogisticRegression
   elo_diff, rest/b2b/g7 diffs, missing-starter diff,
-  rolling form diffs (pts/reb/ast/+/−), home_court
+  rolling form diffs (pts/reb/ast/+/−), absence diff
 Output → P(home win) ∈ (0,1)   (away = 1 − home)
 ```
 

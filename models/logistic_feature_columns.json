@@ -1,0 +1,17 @@
+{
+  "absence_feature": "impact",
+  "calibration": "sigmoid",
+  "columns": [
+    "elo_diff",
+    "rest_diff",
+    "b2b_diff",
+    "g7_diff",
+    "form_pts_diff",
+    "form_reb_diff",
+    "form_ast_diff",
+    "form_pm_diff",
+    "player_deficit_diff"
+  ],
+  "impact_formula": "PTS + 1.5*AST + REB + STL + BLK - TOV",
+  "replacement_adjustment": "skipped_no_reliable_position_data"
+}

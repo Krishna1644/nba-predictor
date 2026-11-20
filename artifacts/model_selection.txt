@@ -1,5 +1,8 @@
-best_model=logistic
-selection_metric=log_loss
-log_loss=0.597458
-brier=0.206574
-accuracy=0.668571
+best_model=logistic_impact_sigmoid
+selection_split=validation
+test_log_loss=0.596765
+test_brier=0.205784
+test_accuracy=0.675102
+bootstrap_delta_mean=-0.001795
+bootstrap_ci95=[-0.003178, -0.000341]
+frozen_eval_season=2025-26

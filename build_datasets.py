@@ -3,8 +3,9 @@ Build leak-safe team-game features, matchup rows, and LSTM sequences.
 
 Splits (by target-game season):
   train/val pool: seasons <= 22023 (through 2023-24)
-  holdout test:   22024 (2024-25)
-  live reserved:  22025 (2025-26) — not used in model selection
+  report test:    22024 (2024-25) — metrics only after val selection
+  frozen eval:    22025 (2025-26) — saved, never used for selection
+  live:           22026 (2026-27) when present
 
 Within the train pool, validation is the chronologically last 20% of
 *target game dates* (true time split), not a row-index cut after team concat.
@@ -22,6 +23,7 @@ from sklearn.preprocessing import StandardScaler
 
 from nba_ml.features import (
     FEATURE_COLUMNS,
+    FROZEN_EVAL_SEASON,
     LOOKBACK,
     LIVE_SEASON,
     MATCHUP_FEATURE_COLUMNS,
@@ -52,8 +54,9 @@ def load_player_logs(db_name: str = DB_NAME) -> pd.DataFrame:
 def season_masks(meta: pd.DataFrame):
     train_pool = meta["season_id"].astype(str) <= TRAIN_SEASON_MAX
     test = meta["season_id"].astype(str) == TEST_SEASON
+    frozen = meta["season_id"].astype(str) == FROZEN_EVAL_SEASON
     live = meta["season_id"].astype(str) == LIVE_SEASON
-    return train_pool, test, live
+    return train_pool, test, frozen, live
 
 
 def chronological_train_val(meta: pd.DataFrame, train_pool_mask: np.ndarray, val_frac=0.2):
@@ -87,16 +90,19 @@ def main():
     # --- Matchup splits ---
     m_train_pool = matchups["season_id"].astype(str) <= TRAIN_SEASON_MAX
     m_test = matchups["season_id"].astype(str) == TEST_SEASON
+    m_frozen = matchups["season_id"].astype(str) == FROZEN_EVAL_SEASON
     m_dates = np.sort(matchups.loc[m_train_pool, "game_date"].unique())
     m_cut = m_dates[int(len(m_dates) * 0.8)]
     matchups_train = matchups.loc[m_train_pool & (matchups["game_date"] < m_cut)].copy()
     matchups_val = matchups.loc[m_train_pool & (matchups["game_date"] >= m_cut)].copy()
     matchups_test = matchups.loc[m_test].copy()
+    matchups_frozen = matchups.loc[m_frozen].copy()
 
     for name, df in [
         ("matchups_train", matchups_train),
         ("matchups_val", matchups_val),
         ("matchups_test", matchups_test),
+        ("matchups_frozen_2025_26", matchups_frozen),
     ]:
         path = os.path.join(DATA_DIR, f"{name}.pkl")
         df.to_pickle(path)
@@ -126,14 +132,17 @@ def main():
     X, y, meta = build_sequences(team_games, lookback=LOOKBACK)
     print(f"\n  Sequences: {X.shape}, win rate={y.mean():.3f}")
 
-    train_pool, test_mask, live_mask = season_masks(meta)
+    train_pool, test_mask, frozen_mask, live_mask = season_masks(meta)
     train_idx, val_idx, date_cut = chronological_train_val(meta, train_pool.values)
     test_idx = meta.index[test_mask]
 
     cut_ts = pd.Timestamp(date_cut)
     print(f"  Train dates < {cut_ts.date()} | Val from {cut_ts.date()}")
     print(f"  Train={len(train_idx)} Val={len(val_idx)} Test(2024-25)={len(test_idx)}")
-    print(f"  Live(2025-26) sequences excluded from eval: {int(live_mask.sum())}")
+    print(
+        f"  Frozen(2025-26) excluded: {int(frozen_mask.sum())} | "
+        f"Live(2026-27) rows: {int(live_mask.sum())}"
+    )
 
     X_train, y_train = X[train_idx], y[train_idx]
     X_val, y_val = X[val_idx], y[val_idx]

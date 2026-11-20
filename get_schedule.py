@@ -69,7 +69,7 @@ if not games_df.empty:
                     
                     if len(team_dates) > 0:
                         last_game_date = team_dates.iloc[0]
-                        rest_days = (today_dt - last_game_date).days
+                        rest_days = min((today_dt - last_game_date).days, 7)
                         is_b2b = 1 if rest_days == 1 else 0
                         
                         # Games in last 7 days

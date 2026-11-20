@@ -1,0 +1,78 @@
+{
+  "selection_split": "validation",
+  "selection_metric": "log_loss",
+  "production_absence_family": "player_deficit",
+  "selected_absence_feature": "impact",
+  "selection_reason": "val_logloss_winner",
+  "selected_columns": [
+    "elo_diff",
+    "rest_diff",
+    "b2b_diff",
+    "g7_diff",
+    "form_pts_diff",
+    "form_reb_diff",
+    "form_ast_diff",
+    "form_pm_diff",
+    "player_deficit_diff"
+  ],
+  "calibration_selected": "sigmoid",
+  "calibration_val": [
+    {
+      "method": "none",
+      "log_loss": 0.6207109911188324,
+      "brier": 0.21591163219303483,
+      "accuracy": 0.645043398812243,
+      "auc": 0.7036608495158759
+    },
+    {
+      "method": "isotonic",
+      "log_loss": 0.6274458140368279,
+      "brier": 0.21619021618602666,
+      "accuracy": 0.6441297396071265,
+      "auc": 0.7035560461405312
+    },
+    {
+      "method": "sigmoid",
+      "log_loss": 0.6207059903694288,
+      "brier": 0.21591727297349614,
+      "accuracy": 0.6464138876199178,
+      "auc": 0.7036693014009845
+    }
+  ],
+  "bootstrap_val_logloss_delta_impact_minus_minutes": {
+    "delta_mean": -0.001795203076305593,
+    "ci95_low": -0.0031784795934587996,
+    "ci95_high": -0.00034119147584450477,
+    "n_boot": 1000,
+    "definition": "delta = logloss(impact) - logloss(minutes); negative => impact better"
+  },
+  "validation_metrics": [
+    {
+      "model": "logistic_impact/val",
+      "n": 2189,
+      "accuracy": 0.645043398812243,
+      "log_loss": 0.6207109911188324,
+      "brier": 0.21591163219303483,
+      "auc": 0.7036608495158759,
+      "base_rate": 0.5555047967108269
+    },
+    {
+      "model": "logistic_minutes/val",
+      "n": 2189,
+      "accuracy": 0.648698035632709,
+      "log_loss": 0.6225223088807222,
+      "brier": 0.2167294798748638,
+      "auc": 0.7008590496024234,
+      "base_rate": 0.5555047967108269
+    }
+  ],
+  "report_test_season": "2024-25",
+  "frozen_season": "2025-26",
+  "impact_formula": "PTS + 1.5*AST + REB + STL + BLK - TOV",
+  "replacement_adjustment": "skipped_no_reliable_position_data",
+  "guards": {
+    "class_weight_kwarg_present": false,
+    "home_court_in_core_features": false
+  },
+  "notes": "Legacy missing_starter not in production candidates. If bootstrap CI for impact-minutes includes 0, ship impact for train/serve consistency. Replacement-at-position skipped. 2025-26 not evaluated."
+}

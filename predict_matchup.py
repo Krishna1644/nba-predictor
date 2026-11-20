@@ -1,8 +1,8 @@
 """
 Tonight's predictions with the production logistic matchup model.
 
-Builds one row per game (home vs away), using pre-game Elo, schedule
-context, rolling form, and injury-based missing-starter minutes.
+Team absence deficit always goes through
+`nba_ml.features.compute_team_absence_deficit` — same function as training.
 """
 
 from __future__ import annotations
@@ -11,32 +11,26 @@ import datetime
 import json
 import os
 import sqlite3
-import unicodedata
 
 import joblib
-import numpy as np
 import pandas as pd
 
 from nba_ml.features import (
     LOOKBACK,
-    MATCHUP_FEATURE_COLUMNS,
+    REST_DAYS_CAP,
     STARTER_MIN_THRESHOLD,
+    compute_team_absence_deficit,
+)
+from nba_ml.player_priors import (
+    annotate_consecutive_misses,
+    build_prior_lookup_from_db,
+    serving_missing_ids_from_injuries,
 )
 
 DB_NAME = "nba_stats.db"
 MODELS_DIR = "models"
 HISTORY_DIR = "history"
-DATA_DIR = "artifacts"
-
-
-def normalize_name(name: str) -> str:
-    if not isinstance(name, str):
-        return ""
-    return "".join(
-        c
-        for c in unicodedata.normalize("NFD", name)
-        if unicodedata.category(c) != "Mn"
-    ).lower().strip()
+LIVE_SEASON_ID = "22026"
 
 
 def get_team_name(team_id):
@@ -49,8 +43,7 @@ def get_team_name(team_id):
         return f"Team {team_id}"
 
 
-def team_abbr_from_id(team_id, rosters: pd.DataFrame) -> str | None:
-    # Prefer roster join via player logs / static teams
+def team_abbr_from_id(team_id) -> str | None:
     try:
         from nba_api.stats.static import teams
 
@@ -60,32 +53,23 @@ def team_abbr_from_id(team_id, rosters: pd.DataFrame) -> str | None:
         return None
 
 
-def load_injured_names():
-    try:
-        injuries = pd.read_csv("injuries.csv")
-        return set(injuries["Player"].map(normalize_name))
-    except Exception:
-        print("  [WARNING] injuries.csv missing — assuming no injuries.")
-        return set()
-
-
 def load_schedule_ctx():
     try:
         ctx = pd.read_csv("schedule_context.csv")
-        return {
-            int(r.TEAM_ID): {
-                "rest_days": int(r.rest_days),
+        out = {}
+        for r in ctx.itertuples():
+            rest = int(min(int(r.rest_days), REST_DAYS_CAP))
+            out[int(r.TEAM_ID)] = {
+                "rest_days": rest,
                 "is_back_to_back": int(r.is_back_to_back),
                 "games_last_7": int(r.games_last_7),
             }
-            for r in ctx.itertuples()
-        }
+        return out
     except Exception:
         return {}
 
 
 def rolling_form_from_db(conn, team_abbr: str) -> dict:
-    """Leak-safe-ish recent form from the last LOOKBACK games in SQLite."""
     q = """
         SELECT Game_ID, GAME_DATE,
                SUM(PTS) as team_pts, SUM(REB) as team_reb, SUM(AST) as team_ast,
@@ -107,42 +91,53 @@ def rolling_form_from_db(conn, team_abbr: str) -> dict:
     }
 
 
-def missing_starter_minutes_tonight(
-    team_id, team_abbr, rosters, injured_names, conn
-) -> float:
-    roster = rosters[rosters["TeamID"] == team_id][["PLAYER_ID", "PLAYER"]]
-    if roster.empty:
-        return 0.0
-    ids = ",".join(str(int(x)) for x in roster["PLAYER_ID"].tolist())
-    logs = pd.read_sql(
-        f"""
-        SELECT Player_ID, MIN, GAME_DATE
-        FROM player_logs
-        WHERE Player_ID IN ({ids})
-        ORDER BY GAME_DATE DESC
-        """,
+def resolve_season_id(conn) -> str:
+    rows = pd.read_sql(
+        "SELECT SEASON_ID, MAX(GAME_DATE) mx FROM player_logs GROUP BY SEASON_ID ORDER BY mx DESC",
         conn,
     )
-    if logs.empty:
+    if rows.empty:
+        return LIVE_SEASON_ID
+    ids = set(rows["SEASON_ID"].astype(str))
+    if LIVE_SEASON_ID in ids:
+        return LIVE_SEASON_ID
+    return str(rows.iloc[0]["SEASON_ID"])
+
+
+def team_absence_deficit_for_serve(
+    conn,
+    season_id: str,
+    team_id: int,
+    team_abbr: str,
+    rosters,
+    injuries,
+    min_minutes: float,
+) -> float:
+    """Build missing list + priors, then call the shared deficit function."""
+    roster = rosters[rosters["TeamID"] == team_id]
+    if roster.empty:
         return 0.0
-    logs["MIN_NUMERIC"] = pd.to_numeric(logs["MIN"], errors="coerce").fillna(0)
-    recent = (
-        logs.groupby("Player_ID")["MIN_NUMERIC"]
-        .apply(lambda s: s.head(15).mean())
+    pids = [int(x) for x in roster["PLAYER_ID"].tolist()]
+    prior_lookup = build_prior_lookup_from_db(conn, season_id, pids)
+    prior_lookup = annotate_consecutive_misses(
+        conn, season_id, team_abbr, prior_lookup
     )
-    starters = recent[recent >= STARTER_MIN_THRESHOLD]
-    missing = 0.0
-    for _, row in roster.iterrows():
-        pid = row["PLAYER_ID"]
-        if normalize_name(row["PLAYER"]) in injured_names and pid in starters.index:
-            missing += float(starters[pid])
-    return missing
+    # Temporarily require the caller's minutes floor (10 for deficit, 25 for legacy)
+    adjusted = {
+        pid: {**p, "minutes": p["minutes"] if p["minutes"] >= min_minutes else 0.0}
+        for pid, p in prior_lookup.items()
+    }
+    missing_ids = serving_missing_ids_from_injuries(injuries, roster, adjusted)
+    return compute_team_absence_deficit(
+        missing_ids, prior_lookup, value_key="impact"
+    )
 
 
 def main():
     print("--- PREDICTING TONIGHT (logistic matchup) ---")
     model_path = os.path.join(MODELS_DIR, "logistic_baseline.pkl")
     elo_path = os.path.join(MODELS_DIR, "elo_ratings.json")
+    cols_path = os.path.join(MODELS_DIR, "logistic_feature_columns.json")
 
     if not os.path.exists(model_path):
         print(f"[FAIL] Missing {model_path}. Run train_baseline.py first.")
@@ -154,18 +149,31 @@ def main():
     model = joblib.load(model_path)
     with open(elo_path, encoding="utf-8") as f:
         elo = json.load(f)
+    if os.path.exists(cols_path):
+        with open(cols_path, encoding="utf-8") as f:
+            feature_cols = json.load(f)["columns"]
+    else:
+        from nba_ml.features import ABSENCE_FEATURE_PLAYER, MATCHUP_CORE_FEATURES
+
+        feature_cols = MATCHUP_CORE_FEATURES + [ABSENCE_FEATURE_PLAYER]
 
     games = pd.read_csv("todays_games.csv")
     rosters = pd.read_csv("todays_rosters.csv")
-    injured = load_injured_names()
+    try:
+        injuries = pd.read_csv("injuries.csv")
+    except Exception:
+        print("  [WARNING] injuries.csv missing — deficits will be 0.")
+        injuries = pd.DataFrame()
     schedule_ctx = load_schedule_ctx()
     conn = sqlite3.connect(DB_NAME)
+    season_id = resolve_season_id(conn)
+    print(f"  Using season_id={season_id} for player priors")
 
     preds = []
     for _, g in games.iterrows():
         home_id, away_id = int(g["HOME_TEAM_ID"]), int(g["VISITOR_TEAM_ID"])
-        home_abbr = team_abbr_from_id(home_id, rosters)
-        away_abbr = team_abbr_from_id(away_id, rosters)
+        home_abbr = team_abbr_from_id(home_id)
+        away_abbr = team_abbr_from_id(away_id)
         if not home_abbr or not away_abbr:
             print(f"  [SKIP] Could not resolve team abbrs for {home_id}/{away_id}")
             continue
@@ -183,11 +191,31 @@ def main():
         )
         hf = rolling_form_from_db(conn, home_abbr)
         af = rolling_form_from_db(conn, away_abbr)
-        hm = missing_starter_minutes_tonight(
-            home_id, home_abbr, rosters, injured, conn
+        # Both columns use compute_team_absence_deficit; only the minutes
+        # floor differs (legacy starters >=25, new rotation >=10). Out-only.
+        hm_def = team_absence_deficit_for_serve(
+            conn, season_id, home_id, home_abbr, rosters, injuries, 10.0
         )
-        am = missing_starter_minutes_tonight(
-            away_id, away_abbr, rosters, injured, conn
+        am_def = team_absence_deficit_for_serve(
+            conn, season_id, away_id, away_abbr, rosters, injuries, 10.0
+        )
+        hm_st = team_absence_deficit_for_serve(
+            conn,
+            season_id,
+            home_id,
+            home_abbr,
+            rosters,
+            injuries,
+            float(STARTER_MIN_THRESHOLD),
+        )
+        am_st = team_absence_deficit_for_serve(
+            conn,
+            season_id,
+            away_id,
+            away_abbr,
+            rosters,
+            injuries,
+            float(STARTER_MIN_THRESHOLD),
         )
 
         row = {
@@ -195,25 +223,15 @@ def main():
             "rest_diff": hs["rest_days"] - as_["rest_days"],
             "b2b_diff": hs["is_back_to_back"] - as_["is_back_to_back"],
             "g7_diff": hs["games_last_7"] - as_["games_last_7"],
-            "missing_starter_diff": hm - am,
+            "missing_starter_diff": hm_st - am_st,
+            "player_deficit_diff": hm_def - am_def,
             "form_pts_diff": hf["form_pts"] - af["form_pts"],
             "form_reb_diff": hf["form_reb"] - af["form_reb"],
             "form_ast_diff": hf["form_ast"] - af["form_ast"],
             "form_pm_diff": hf["form_pm"] - af["form_pm"],
-            "home_court": 1,
-            "home_elo": home_elo,
-            "away_elo": away_elo,
-            "home_rest": hs["rest_days"],
-            "away_rest": as_["rest_days"],
-            "home_b2b": hs["is_back_to_back"],
-            "away_b2b": as_["is_back_to_back"],
-            "home_g7": hs["games_last_7"],
-            "away_g7": as_["games_last_7"],
-            "home_missing_starter_min": hm,
-            "away_missing_starter_min": am,
         }
-        # Model was trained on MATCHUP_FEATURE_COLUMNS only
-        X = pd.DataFrame([{c: row[c] for c in MATCHUP_FEATURE_COLUMNS}])
+
+        X = pd.DataFrame([{c: row[c] for c in feature_cols}])
         home_prob = float(model.predict_proba(X)[0, 1])
         away_prob = 1.0 - home_prob
         winner = home_name if home_prob >= away_prob else away_name
@@ -230,6 +248,8 @@ def main():
                 "Predicted_Winner": winner,
                 "Confidence": conf,
                 "Model": "logistic_matchup",
+                "Home_Player_Deficit": hm_def,
+                "Away_Player_Deficit": am_def,
             }
         )
 
