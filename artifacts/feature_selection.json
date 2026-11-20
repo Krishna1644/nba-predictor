@@ -1,0 +1,95 @@
+{
+  "selection_split": "validation",
+  "selection_metric": "log_loss",
+  "selected_absence_feature": "efficiency",
+  "value_key": "impact_eff",
+  "selected_columns": [
+    "elo_diff",
+    "rest_diff",
+    "b2b_diff",
+    "g7_diff",
+    "form_pts_diff",
+    "form_reb_diff",
+    "form_ast_diff",
+    "form_pm_diff",
+    "player_deficit_eff_diff"
+  ],
+  "calibration_selected": "none",
+  "calibration_val": [
+    {
+      "method": "none",
+      "log_loss": 0.6008012650532831,
+      "brier": 0.20740115262513736,
+      "accuracy": 0.6653011061040557,
+      "auc": 0.7341414174217085
+    },
+    {
+      "method": "isotonic",
+      "log_loss": 0.6177862066408586,
+      "brier": 0.20732773532131907,
+      "accuracy": 0.6702171241294551,
+      "auc": 0.7343335606577253
+    },
+    {
+      "method": "sigmoid",
+      "log_loss": 0.6008623176672673,
+      "brier": 0.20742085701235816,
+      "accuracy": 0.6644817697664891,
+      "auc": 0.7341765985775988
+    }
+  ],
+  "bootstrap_val_logloss_delta_efficiency_minus_counting": {
+    "delta_mean": -0.0008089093106063043,
+    "ci95_low": -0.0013410507190163678,
+    "ci95_high": -0.000293032259970713,
+    "n_boot": 1000,
+    "definition": "delta = logloss(efficiency) - logloss(counting); negative => efficiency better"
+  },
+  "bootstrap_val_logloss_delta_counting_minus_minutes": {
+    "delta_mean": -0.0027460193025236218,
+    "ci95_low": -0.003986283753327177,
+    "ci95_high": -0.0014726371507027076,
+    "n_boot": 1000,
+    "definition": "delta = logloss(counting) - logloss(minutes); negative => counting better"
+  },
+  "validation_metrics": [
+    {
+      "model": "logistic_counting/val",
+      "n": 2441,
+      "accuracy": 0.6624334289225727,
+      "log_loss": 0.6016135074769313,
+      "brier": 0.20774667967606067,
+      "auc": 0.7332253542471774,
+      "base_rate": 0.5440393281442032
+    },
+    {
+      "model": "logistic_efficiency/val",
+      "n": 2441,
+      "accuracy": 0.6653011061040557,
+      "log_loss": 0.6008012650532831,
+      "brier": 0.20740115262513736,
+      "auc": 0.7341414174217085,
+      "base_rate": 0.5440393281442032
+    },
+    {
+      "model": "logistic_minutes/val",
+      "n": 2441,
+      "accuracy": 0.6636624334289226,
+      "log_loss": 0.6043505035994311,
+      "brier": 0.20889091713633431,
+      "auc": 0.7300955844943114,
+      "base_rate": 0.5440393281442032
+    }
+  ],
+  "train_season_max": "2024-25",
+  "report_test_season": "2025-26",
+  "live_season": "2026-27",
+  "selection_note": "Absence feature + calibration chosen on VAL only; 2025-26 is report-only and was not used for selection.",
+  "counting_formula": "PTS + 1.5*AST + REB + STL + BLK - TOV",
+  "efficiency_formula": "PTS + 0.4*FGM - 0.7*FGA - 0.4*(FTA-FTM) + 0.7*OREB + 0.3*DREB + STL + 0.7*AST + 0.7*BLK - 0.4*PF - TOV",
+  "replacement_adjustment": "skipped_no_reliable_position_data",
+  "guards": {
+    "class_weight_kwarg_present": false,
+    "home_court_in_core_features": false
+  }
+}

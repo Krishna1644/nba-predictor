@@ -1,0 +1,8 @@
+best_model=logistic_efficiency_none
+value_key=impact_eff
+test_log_loss=0.591327
+test_brier=0.203170
+test_accuracy=0.684898
+boot_eff_minus_counting=-0.000809 [-0.001341, -0.000293]
+report_test_season=2025-26
+live_season=2026-27

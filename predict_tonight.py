@@ -150,20 +150,34 @@ def build_team_sequence(team_id, rosters_df, conn, injured_names, schedule_ctx, 
     if len(recent_game_ids) < LOOKBACK:
         return None
     
-    # Compute season-average minutes per player (for missing_starter_minutes)
-    player_avg_min = player_logs.groupby('Player_ID')['MIN_NUMERIC'].mean()
-    starters = player_avg_min[player_avg_min >= STARTER_MIN_THRESHOLD]
-    
-    # Calculate missing_starter_minutes for tonight
-    # Cross-reference injuries with starters
-    roster_names = rosters_df[rosters_df['TeamID'] == team_id][['PLAYER_ID', 'PLAYER']]
-    tonight_missing_min = 0.0
-    
-    for _, row in roster_names.iterrows():
-        pid = row['PLAYER_ID']
-        pname = normalize_name(row['PLAYER'])
-        if pname in injured_names and pid in starters.index:
-            tonight_missing_min += starters[pid]
+    # Tonight absence deficit via the SAME shared function as training/logistic.
+    # Missing list = Status=="Out" rotation players; value = pre-game blended impact.
+    from nba_ml.features import compute_team_absence_deficit
+    from nba_ml.player_priors import (
+        annotate_consecutive_misses,
+        build_prior_lookup_from_db,
+        serving_missing_ids_from_injuries,
+    )
+
+    roster_names = rosters_df[rosters_df['TeamID'] == team_id]
+    try:
+        injuries_df = pd.read_csv('injuries.csv')
+    except Exception:
+        injuries_df = pd.DataFrame()
+
+    pids = [int(x) for x in roster_names['PLAYER_ID'].tolist()] if not roster_names.empty else []
+    season_id = str(player_logs['SEASON_ID'].iloc[0]) if not player_logs.empty else '22026'
+    team_abbr = (
+        player_logs['MATCHUP'].iloc[0].split(' ')[0].strip()
+        if not player_logs.empty else ''
+    )
+    prior_lookup = build_prior_lookup_from_db(conn, season_id, pids)
+    if team_abbr:
+        prior_lookup = annotate_consecutive_misses(conn, season_id, team_abbr, prior_lookup)
+    missing_ids = serving_missing_ids_from_injuries(injuries_df, roster_names, prior_lookup)
+    tonight_missing_min = compute_team_absence_deficit(missing_ids, prior_lookup)
+
+    tonight_schedule = schedule_ctx.get(team_id, {})
     
     # Build team-game features for the last LOOKBACK games
     sequence_rows = []
@@ -221,13 +235,16 @@ def build_team_sequence(team_id, rosters_df, conn, injured_names, schedule_ctx, 
         g7 = sum(1 for d in dates_list[:game_date_idx] if pd.Timestamp(d) >= seven_ago)
         row['games_last_7'] = g7
         
-        # Missing starter minutes for historical games
-        played_ids = set(game_logs['Player_ID'].unique())
-        hist_missing = 0.0
-        for pid, avg_min in starters.items():
-            if pid not in played_ids:
-                hist_missing += avg_min
-        row['missing_starter_minutes'] = hist_missing
+        # Historical absence: same shared deficit fn; missing = rotation DNPs
+        played_ids = {int(x) for x in game_logs['Player_ID'].unique()}
+        hist_missing_ids = [
+            pid
+            for pid, pr in prior_lookup.items()
+            if pid not in played_ids and pr.get('minutes', 0) >= 10
+        ]
+        row['missing_starter_minutes'] = compute_team_absence_deficit(
+            hist_missing_ids, prior_lookup
+        )
         
         # Elo and opponent strength context
         # Get team abbreviation for context lookups
@@ -251,18 +268,26 @@ def build_team_sequence(team_id, rosters_df, conn, injured_names, schedule_ctx, 
     if len(sequence_rows) < LOOKBACK:
         return None
     
-    # Override the most recent game's context with tonight's actual values
-    # The last entry in the sequence is the most recent historical game
-    # For the PREDICTION game (tonight), we inject tonight's context into
-    # the sequence as-is — the model was trained on historical sequences
-    # where each timestep has its own context.
-    
-    # Build feature matrix (LOOKBACK x 24)
+    # Inject tonight's injury + schedule context into the most recent timestep.
+    # The lookback window is still historical box scores; situational features
+    # for "entering tonight" overwrite the last row's context fields.
+    if sequence_rows:
+        last = sequence_rows[-1]
+        last['missing_starter_minutes'] = tonight_missing_min
+        if tonight_schedule:
+            last['rest_days'] = int(tonight_schedule.get('rest_days', last['rest_days']))
+            last['is_back_to_back'] = int(
+                tonight_schedule.get('is_back_to_back', last['is_back_to_back'])
+            )
+            last['games_last_7'] = int(
+                tonight_schedule.get('games_last_7', last['games_last_7'])
+            )
+        last['is_home'] = int(is_home)
+
     feature_matrix = np.array(
         [[row[col] for col in FEATURE_COLUMNS] for row in sequence_rows],
         dtype=np.float32
     )
-    
     return feature_matrix
 
 

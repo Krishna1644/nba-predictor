@@ -13,36 +13,75 @@ except ImportError:
     genai = None
 
 # 1. SETUP
-st.set_page_config(page_title="NBA LSTM Predictor", layout="wide", page_icon="🏀")
-st.title("🏀 NBA AI Prediction Engine")
+st.set_page_config(page_title="NBA Win Probability", layout="wide")
+st.title("NBA Win Probability")
+st.caption("Production: logistic + efficiency deficit (train ≤2024-25, report 2025-26). LSTM comparison only.")
+
+def _first_existing(*paths):
+    for p in paths:
+        if os.path.exists(p):
+            return p
+    return None
+
+
+def _norm_game_id(series: pd.Series) -> pd.Series:
+    """Align GAME_ID formats (0052500201 vs 52500201)."""
+    s = series.astype(str).str.replace(r"\.0$", "", regex=True).str.lstrip("0")
+    return s.replace("", "0")
+
 
 # 2. LOAD DATA
 @st.cache_data(ttl=600)  # Clear cache every 10 mins
 def load_data():
     try:
-        preds = pd.read_csv('final_predictions.csv')
-        games = pd.read_csv('todays_games.csv')
-        try: rosters = pd.read_csv('todays_rosters.csv')
-        except: rosters = pd.DataFrame()
-        try: injuries = pd.read_csv('injuries.csv')
-        except: injuries = pd.DataFrame()
-        try: schedule_ctx = pd.read_csv('schedule_context.csv')
-        except: schedule_ctx = pd.DataFrame()
+        preds_path = _first_existing("data/live/final_predictions.csv", "final_predictions.csv")
+        games_path = _first_existing("data/live/todays_games.csv", "todays_games.csv")
+        if not preds_path or not games_path:
+            return None, None, None, None, None, None
+        preds = pd.read_csv(preds_path)
+        games = pd.read_csv(games_path)
+        if "GAME_ID" in preds.columns:
+            preds["GAME_ID"] = _norm_game_id(preds["GAME_ID"])
+        if "GAME_ID" in games.columns:
+            games["GAME_ID"] = _norm_game_id(games["GAME_ID"])
         try:
-            with open('models/elo_ratings.json') as f:
+            rosters = pd.read_csv(
+                _first_existing("data/live/todays_rosters.csv", "todays_rosters.csv")
+            )
+        except Exception:
+            rosters = pd.DataFrame()
+        try:
+            injuries = pd.read_csv(_first_existing("data/live/injuries.csv", "injuries.csv"))
+        except Exception:
+            injuries = pd.DataFrame()
+        try:
+            schedule_ctx = pd.read_csv(
+                _first_existing("data/live/schedule_context.csv", "schedule_context.csv")
+            )
+        except Exception:
+            schedule_ctx = pd.DataFrame()
+        try:
+            with open("models/elo_ratings.json") as f:
                 elo = json.load(f)
-        except:
+        except Exception:
             elo = {}
-            
+
         return preds, games, rosters, injuries, schedule_ctx, elo
-    except Exception as e:
+    except Exception:
         return None, None, None, None, None, None
 
 @st.cache_data(ttl=3600)
 def load_season_stats():
     if not os.path.exists('nba_stats.db'): return pd.DataFrame()
     conn = sqlite3.connect('nba_stats.db')
-    query = """
+    # Prefer live 2026-27; fall back to report season if live not fetched yet.
+    season_ids = pd.read_sql(
+        "SELECT DISTINCT SEASON_ID FROM player_logs ORDER BY SEASON_ID DESC", conn
+    )["SEASON_ID"].astype(str).tolist()
+    season_id = "22026" if "22026" in season_ids else (
+        "22025" if "22025" in season_ids else (season_ids[0] if season_ids else "22026")
+    )
+    query = f"""
     WITH team_games AS (
         SELECT 
             TEAM_ABBR,
@@ -60,7 +99,7 @@ def load_season_stats():
             SUM(TOV) as TOV,
             SUM(PLUS_MINUS)/5.0 as PLUS_MINUS
         FROM player_logs
-        WHERE SEASON_ID = '22025'
+        WHERE SEASON_ID = '{season_id}'
         GROUP BY TEAM_ABBR, Game_ID
     )
     SELECT 
@@ -210,12 +249,12 @@ with tab1:
 
 # --- TAB 2: SEASON LEADERBOARD ---
 with tab2:
-    st.header("📈 2025-26 Season Leaderboard")
+    st.header("📈 Season Leaderboard (live 2026-27 when available)")
     
     with st.expander("📚 Metric Glossary / Legend"):
         st.markdown("""
         * **Elo**: Historical zero-sum power rating algorithm. 1500 is average.
-        * **Win%**: Win Percentage for the 2025-26 Season.
+        * **Win%**: Win Percentage for the current live season.
         * **PPG / RPG / APG**: Points, Rebounds, and Assists per game.
         * **DIFF**: Average Point Differential per game (Total Points Scored - Total Points Allowed).
         * **eFG%** (Effective Field Goal %): Adjusts standard FG% to account for the fact that 3-point shots are worth 50% more than 2-point shots.
@@ -241,7 +280,7 @@ with tab2:
             hide_index=True, use_container_width=True, height=800
         )
     else:
-        st.warning("Season stats not generated. Ensure nba_stats.db contains data for exactly SEASON_ID '22025'.")
+        st.warning("Season stats not generated. Ensure nba_stats.db has SEASON_ID 22026 (or 22025).")
 
 # --- TAB 3: NBA AI ASSISTANT ---
 with tab3:
@@ -285,7 +324,7 @@ with tab3:
                 context_payload += pd.DataFrame(mapped_injuries).to_string(index=False) + "\n\n"
             else:
                 context_payload += injuries.to_string(index=False) + "\n\n"
-            context_payload += "--- CURRENT SEASON TEAM STATS (2025-26) ---\n"
+            context_payload += "--- CURRENT SEASON TEAM STATS ---\n"
             if not season_stats_df.empty:
                 context_payload += season_stats_df[['TEAM_ABBR', 'Win%', 'PPG', 'DIFF', 'eFG%', 'TS%', 'TOV%']].to_string(index=False) + "\n"
 
@@ -332,31 +371,26 @@ with tab3:
 
 # --- TAB 4: MODEL ARCHITECTURE ---
 with tab4:
-    st.header("🧠 BiLSTM + Attention Architecture")
+    st.header("Model card")
     st.markdown("""
-    ### Deep Learning Topology
-    ```
-    Input:   (10 games × 24 features)
-        ↓
-    BiLSTM:  128 units (64 per direction), return_sequences=True
-    Dropout: 0.3
-        ↓
-    BiLSTM:  64 units (32 per direction), return_sequences=True
-    Dropout: 0.3
-        ↓
-    Attention: Learns which games in the rolling window matter most
-        ↓
-    Dense:   16 units, ReLU
-    Dropout: 0.3
-        ↓
-    Output:  1 unit, Sigmoid → Win Probability
-    ```
-    """)
-    st.markdown("### Feature Matrix Definition")
-    c1, c2, c3 = st.columns(3)
-    c1.markdown("**Performance (9)**\n- PTS, REB, AST, STL, BLK, TOV\n- Max PTS, REB, AST (Absence Proxy)")
-    c2.markdown("**Efficiency/Strength (11)**\n- FG%, 3P%, FT%, eFG%, TS%, TOV%\n- Plus/Minus, Home Flag\n- Team Elo, Opp Win%, Opp Def Rtg")
-    c3.markdown("**Situational (4)**\n- Rest Days, Back-to-Back, Games in 7d\n- Missing Starter Minutes")
+**Shipped model:** logistic regression on one row per game (home win probability).
+
+**Holdout (2025-26 report-only):** logistic with efficiency deficit.
+Train 2015-16→2024-25; VAL picks features/calib; 2025-26 never used for selection.
+Live serve: 2026-27. See `README.md`.
+
+```
+Features → StandardScaler → LogisticRegression (± Platt if VAL picks it)
+  elo_diff, rest/b2b/g7 diffs, efficiency player-deficit diff,
+  rolling form diffs (pts/reb/ast/+/−)
+Output → P(home win) ∈ (0,1)   (away = 1 − home)
+```
+
+**Retired from production:** BiLSTM + Attention (comparison only).
+
+**Leakage controls:** priors from prior games only; chronological train/val;
+2025-26 held out from selection.
+""")
     
 # --- TAB 5: PROJECTIONS ---
 with tab5:
@@ -397,7 +431,7 @@ with tab6:
                     if results:
                         c1, c2 = st.columns(2)
                         c1.metric("Games Evaluated", total)
-                        c2.metric("Neural Net Accuracy", f"{(correct/total):.1%}")
+                        c2.metric("Prediction Accuracy", f"{(correct/total):.1%}")
                         st.dataframe(pd.DataFrame(results), hide_index=True, use_container_width=True)
             except Exception as e: st.error(f"Error checking DB results: {e}")
         else: st.info("Legacy prediction format detected. Validation off.")

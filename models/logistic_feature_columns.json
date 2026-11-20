@@ -1,0 +1,19 @@
+{
+  "absence_feature": "efficiency",
+  "value_key": "impact_eff",
+  "calibration": "none",
+  "columns": [
+    "elo_diff",
+    "rest_diff",
+    "b2b_diff",
+    "g7_diff",
+    "form_pts_diff",
+    "form_reb_diff",
+    "form_ast_diff",
+    "form_pm_diff",
+    "player_deficit_eff_diff"
+  ],
+  "counting_formula": "PTS + 1.5*AST + REB + STL + BLK - TOV",
+  "efficiency_formula": "PTS + 0.4*FGM - 0.7*FGA - 0.4*(FTA-FTM) + 0.7*OREB + 0.3*DREB + STL + 0.7*AST + 0.7*BLK - 0.4*PF - TOV",
+  "replacement_adjustment": "skipped_no_reliable_position_data"
+}

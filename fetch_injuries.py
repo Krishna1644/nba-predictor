@@ -57,6 +57,11 @@ try:
 
     # Apply the cleaning
     all_injuries['Player'] = all_injuries['Player'].apply(clean_player_name)
+
+    # Canonical Status so serving can require exactly "Out"
+    from nba_ml.absence import canonicalize_injury_status
+    if 'Status' in all_injuries.columns:
+        all_injuries['Status'] = all_injuries['Status'].apply(canonicalize_injury_status)
     
     # Save
     all_injuries.to_csv("injuries.csv", index=False)

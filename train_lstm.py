@@ -170,7 +170,7 @@ def main():
     print(f"  y_train: {y_train.shape} (win rate: {y_train.mean():.3f})")
     print(f"  y_val:   {y_val.shape} (win rate: {y_val.mean():.3f})")
     
-    input_shape = (X_train.shape[1], X_train.shape[2])  # (10, 21)
+    input_shape = (X_train.shape[1], X_train.shape[2])  # (10, 24)
     
     # 2. Build model
     print(f"\n  Building model with input shape {input_shape}...")

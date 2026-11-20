@@ -4,8 +4,8 @@ import numpy as np
 from nba_api.stats.endpoints import leaguegamelog
 
 # CONFIG
-SEASON_STR = '2025-26' 
-SEASON_ID = '22025'
+SEASON_STR = '2026-27'
+SEASON_ID = '22026'
 DB_NAME = "nba_stats.db"
 
 def compute_advanced_metrics(df):
