@@ -251,6 +251,35 @@ tab_picks, tab_season, tab_model, tab_val = st.tabs(
     ["Tonight's picks", "Season", "Model", "Validation"]
 )
 
+# Green pick badge (works in dark theme)
+st.markdown(
+    """
+<style>
+.pick-winner {
+  display: inline-block;
+  background: rgba(34, 197, 94, 0.18);
+  color: #4ADE80;
+  border: 1px solid rgba(74, 222, 128, 0.55);
+  border-radius: 8px;
+  padding: 0.35rem 0.75rem;
+  font-weight: 700;
+  font-size: 1.05rem;
+  line-height: 1.4;
+}
+.pick-winner span.prob {
+  color: #86EFAC;
+  font-weight: 600;
+  margin-left: 0.35rem;
+}
+.pick-side-label {
+  color: #4ADE80;
+  font-weight: 700;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
 # --- Tonight's picks (Matchups + Projections) ---
 with tab_picks:
     st.subheader(f"Tonight's picks · {slate or 'unknown date'}")
@@ -261,6 +290,7 @@ with tab_picks:
         home_p = float(pred["Home_Win_Prob"])
         away_p = float(pred["Away_Win_Prob"])
         win_p = win_prob_col(pred)
+        winner = str(pred["Predicted_Winner"])
         reason = pred.get("Reason") if "Reason" in pred.index else None
         if not isinstance(reason, str) or not reason:
             reason = "See Model tab for feature methodology."
@@ -272,14 +302,33 @@ with tab_picks:
             with c_logo_a:
                 if la:
                     st.image(la, width=56)
-                st.caption(away)
+                if winner == away:
+                    st.markdown(
+                        f'<p class="pick-side-label">{away}</p>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.caption(away)
             with c_logo_h:
                 if lh:
                     st.image(lh, width=56)
-                st.caption(home)
+                if winner == home:
+                    st.markdown(
+                        f'<p class="pick-side-label">{home}</p>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.caption(home)
             with c_mid:
-                st.markdown(f"**{pred['Predicted_Winner']}** · {win_p:.0%} win probability")
-                st.progress(min(max(home_p, 0.0), 1.0), text=f"Home {home_p:.0%}  ·  Away {away_p:.0%}")
+                st.markdown(
+                    f'<div class="pick-winner">{winner}'
+                    f'<span class="prob">· {win_p:.0%} win probability</span></div>',
+                    unsafe_allow_html=True,
+                )
+                st.progress(
+                    min(max(home_p, 0.0), 1.0),
+                    text=f"Home {home_p:.0%}  ·  Away {away_p:.0%}",
+                )
                 st.caption(reason)
 
             # Detail metrics
@@ -394,7 +443,23 @@ with tab_picks:
     ):
         if c in show.columns and c not in keep:
             keep.append(c)
-    st.dataframe(show.loc[:, keep], hide_index=True, use_container_width=True)
+    table = show.loc[:, keep].copy()
+    if "Predicted_Winner" in table.columns:
+        def _green_winner(col):
+            if col.name != "Predicted_Winner":
+                return [""] * len(col)
+            return [
+                "background-color: rgba(34,197,94,0.22); color: #4ADE80; font-weight: 700"
+                for _ in col
+            ]
+
+        st.dataframe(
+            table.style.apply(_green_winner, axis=0),
+            hide_index=True,
+            use_container_width=True,
+        )
+    else:
+        st.dataframe(table, hide_index=True, use_container_width=True)
     st.download_button(
         "Download CSV",
         data=preds_df.to_csv(index=False).encode("utf-8"),
